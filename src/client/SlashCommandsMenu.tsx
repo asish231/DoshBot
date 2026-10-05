@@ -54,10 +54,9 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   {
     id: 'subagents',
     command: '/subagents',
-    name: 'Subagents & Dots',
-    description: 'View active subagents, create specialized agents, and configure models',
+    name: 'Subagent Swarm',
+    description: 'Split the task across 2-5 parallel subagents and merge results',
     category: 'tools',
-    immediate: true,
   },
   {
     id: 'mcp',

@@ -31,7 +31,6 @@ import {
   Lightbulb,
   FileText,
   CalendarClock,
-  Sparkles,
 } from 'lucide-react';
 
 function formatModelName(model: string): string {
@@ -356,6 +355,15 @@ export function App() {
     }
   };
 
+  const renameConversation = async (id: string, title: string) => {
+    try {
+      await api(`/conversations/${id}`, 'PATCH', { title });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not rename conversation.');
+    }
+  };
+
   const clearAllConversations = async () => {
     try {
       await api('/conversations', 'DELETE');
@@ -587,6 +595,7 @@ export function App() {
               setMobile(false);
             }}
             onNew={() => void newConversation()}
+            onRename={(id, title) => void renameConversation(id, title)}
             onDelete={(id) => void deleteConversation(id)}
             onClearAll={() => void clearAllConversations()}
           />
@@ -765,7 +774,6 @@ export function App() {
                 <div className="new-conversation doshbot-hero">
                   <div className="empty-chat-persona modern-hero">
                     <div className="hero-badge">
-                      <Sparkles size={13} />
                       <span>DoshBot · Always-on coding coworker</span>
                     </div>
                     <Mascot
@@ -786,7 +794,7 @@ export function App() {
                       </button>
                       <button
                         className="hero-btn"
-                        onClick={() => setPrompt('/plan Design a 24/7 automation for ')}
+                        onClick={() => setPrompt('/schedule ')}
                         disabled={!configured}
                       >
                         <CalendarClock size={15} />
@@ -832,7 +840,7 @@ export function App() {
                           preferences are ready to use.
                         </p>
                         <a
-                          href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP.md"
+                          href="https://github.com/asish231/DoshBot/blob/main/docs/SETUP.md"
                           target="_blank"
                           rel="noreferrer"
                         >

@@ -52,6 +52,45 @@ function lineNumbersAt(content: string, offsets: number[]): number[] {
   });
 }
 
+/** OpenCode-edit parity: return the edited region with numbered context lines. */
+function formatEditSnippet(
+  filePath: string,
+  content: string,
+  focusCharOffset: number,
+  focusCharLength = 0,
+  contextLines = 6,
+): string {
+  const lines = content.split('\n');
+  let cursor = 0;
+  let focusLine = 1;
+  for (let i = 0; i < lines.length; i++) {
+    const next = cursor + lines[i]!.length + 1;
+    if (focusCharOffset < next) {
+      focusLine = i + 1;
+      break;
+    }
+    cursor = next;
+    focusLine = lines.length;
+  }
+  const start = Math.max(1, focusLine - contextLines);
+  const focusEndLine = (() => {
+    let c = cursor;
+    let line = focusLine;
+    const end = focusCharOffset + focusCharLength;
+    while (c < end && line < lines.length) {
+      c += lines[line - 1]!.length + 1;
+      line += 1;
+    }
+    return Math.min(lines.length, line);
+  })();
+  const end = Math.min(lines.length, Math.max(focusEndLine, focusLine) + contextLines);
+  const numbered = lines
+    .slice(start - 1, end)
+    .map((line, idx) => `${start + idx === focusLine ? '>' : ' '}${String(start + idx).padStart(6, ' ')}  ${line}`)
+    .join('\n');
+  return `Edited ${filePath} (lines ${start}-${end} of ${lines.length}, '>' marks the edit):\n${numbered}\n`;
+}
+
 function formatFileView(
   filePath: string,
   content: string,
@@ -189,7 +228,7 @@ Commands:
         }
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, file_text, 'utf-8');
-        return `New file created successfully at: ${rawPath}`;
+        return `New file created successfully at: ${rawPath}\n${formatFileView(rawPath, file_text).slice(0, 4000)}`;
       }
 
       if (command === 'str_replace') {
@@ -224,7 +263,7 @@ Commands:
         const updated =
           currentContent.slice(0, offset) + replacement + currentContent.slice(offset + old_str.length);
         writeFileSync(target, updated, 'utf-8');
-        return `The file ${rawPath} has been edited successfully.`;
+        return `The file ${rawPath} has been edited successfully.\n${formatEditSnippet(rawPath, updated, offset, replacement.length)}`;
       }
 
       if (command === 'insert') {
@@ -258,8 +297,10 @@ Commands:
           ...newLines,
           ...lines.slice(insert_line),
         ];
-        writeFileSync(target, updatedLines.join('\n'), 'utf-8');
-        return `Inserted content successfully after line ${insert_line} in ${rawPath}.`;
+        const updatedContent = updatedLines.join('\n');
+        writeFileSync(target, updatedContent, 'utf-8');
+        const insertCharOffset = lines.slice(0, insert_line).join('\n').length + (insert_line > 0 ? 1 : 0);
+        return `Inserted content successfully after line ${insert_line} in ${rawPath}.\n${formatEditSnippet(rawPath, updatedContent, insertCharOffset, new_str.length)}`;
       }
 
       if (command === 'undo_edit') {

@@ -1,4 +1,4 @@
-import { exec, execFile } from 'node:child_process';
+import { exec, execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -232,6 +232,8 @@ export interface OpenCodeRunOptions {
   variant?: string;
   workdir?: string;
   timeoutMs?: number;
+  /** Workspace file paths to attach via `opencode run --file` (repeatable). */
+  files?: string[];
 }
 
 export interface OpenCodeRunResult {
@@ -261,16 +263,56 @@ export async function runOpenCode(options: OpenCodeRunOptions): Promise<OpenCode
   if (options.variant && options.variant !== 'default') {
     args.push('--variant', options.variant);
   }
+  for (const f of options.files ?? []) {
+    if (f.trim()) args.push('--file', f);
+  }
   if (options.workdir) {
     args.push('--dir', options.workdir);
   }
 
   try {
-    const { stdout, stderr } = await execFileAsync(binaryPath, args, {
-      timeout: options.timeoutMs || 60_000,
-      maxBuffer: 20 * 1024 * 1024,
-      cwd: options.workdir || process.cwd(),
-    });
+  // NOTE: stdin must be ignored, not piped. `opencode run` reads piped stdin
+  // as extra message input, so a default-piped stdin hangs forever.
+  const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>(
+    (resolvePromise, rejectPromise) => {
+      const child = spawn(binaryPath, args, {
+        cwd: options.workdir || process.cwd(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      const timer = setTimeout(() => {
+        try {
+          child.kill('SIGKILL');
+        } catch {}
+        rejectPromise(new Error(`OpenCode run timed out after ${options.timeoutMs || 60_000}ms.`));
+      }, options.timeoutMs || 60_000);
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk);
+        if (stdout.length > 20 * 1024 * 1024) {
+          stdout = stdout.slice(-20 * 1024 * 1024);
+        }
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk);
+        if (stderr.length > 4 * 1024 * 1024) {
+          stderr = stderr.slice(-4 * 1024 * 1024);
+        }
+      });
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        rejectPromise(err);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code !== 0 && !stdout.trim()) {
+          rejectPromise(new Error(`OpenCode exited with code ${code}: ${stderr.trim().slice(0, 500)}`));
+          return;
+        }
+        resolvePromise({ stdout, stderr });
+      });
+    },
+  );
 
     let fullText = '';
     let tokens: { total: number; input: number; output: number } | undefined;

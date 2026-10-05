@@ -26,6 +26,8 @@ export interface Settings {
   connectors?: string | null;
   /** Active local coding directory path (defaults to process.cwd()) */
   codingDirectory?: string | null;
+  /** Folder tools on/off. false = chat without local folder tools (no editor/bash/opencode). Defaults on. */
+  codingEnabled?: boolean | null;
   /** JSON string: { bash: 'auto' | 'ask' | 'deny', edits: 'auto' | 'ask' | 'deny' } */
   codingPermissions?: string | null;
   /** Reasoning effort variant for OpenCode models ('minimal' | 'low' | 'medium' | 'high' | 'max') */

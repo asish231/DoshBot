@@ -1,5 +1,6 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { getOpenCodeStatus, runOpenCode } from './opencode.js';
 import { pageRoutes } from './page-routes.js';
 import { Hono } from 'hono';
@@ -159,6 +160,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       exists,
       isGit,
       permissions,
+      codingEnabled: settings.codingEnabled !== false,
     });
   });
 
@@ -193,6 +195,35 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       directory: updated.codingDirectory,
       permissions: perms,
     });
+  });
+
+  app.get('/workspace/browse', (c) => {
+    const requested = c.req.query('path')?.trim() || homedir();
+    let dir: string;
+    try {
+      dir = resolve(requested);
+    } catch {
+      return c.json({ error: 'Invalid path.' }, 400);
+    }
+    if (!existsSync(dir)) {
+      return c.json({ error: `Directory does not exist: ${dir}` }, 404);
+    }
+    let entries: Array<{ name: string; path: string }> = [];
+    try {
+      const names = readdirSync(dir);
+      for (const name of names) {
+        if (entries.length >= 200) break;
+        if (name.startsWith('.')) continue;
+        const full = join(dir, name);
+        try {
+          if (statSync(full).isDirectory()) entries.push({ name, path: full });
+        } catch {}
+      }
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return c.json({ error: `Cannot read directory: ${dir}` }, 403);
+    }
+    return c.json({ path: dir, parent: dirname(dir), home: homedir(), entries });
   });
 
   app.get('/conversations/:threadId/session-memories', (c) => {
@@ -351,6 +382,23 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     } catch (e: any) {
       return c.json(
         { error: e?.message || 'Could not delete conversation.' },
+        500,
+      );
+    }
+  });
+  app.patch('/conversations/:id', async (c) => {
+    const id = c.req.param('id');
+    const data = z
+      .object({ title: z.string().trim().min(1).max(120) })
+      .safeParse(await c.req.json());
+    if (!data.success)
+      return c.json({ error: 'A conversation title (1-120 chars) is required.' }, 400);
+    try {
+      platform.workspace.updateThread(id, { title: data.data.title });
+      return c.json({ success: true, id, title: data.data.title });
+    } catch (e: any) {
+      return c.json(
+        { error: e?.message || 'Could not rename conversation.' },
         500,
       );
     }

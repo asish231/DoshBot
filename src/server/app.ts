@@ -194,6 +194,7 @@ export function createApp({
         twilioAuthToken: z.string().trim().max(100).nullable().optional(),
         connectors: z.string().max(32768).nullable().optional(),
         codingDirectory: z.string().trim().max(1000).nullable().optional(),
+        codingEnabled: z.boolean().optional(),
         codingPermissions: z.string().max(4096).nullable().optional(),
         opencodeVariant: z.string().trim().max(50).nullable().optional(),
       })

@@ -249,3 +249,62 @@ it('aborts the TanStack provider request when the owner pauses work', async () =
   await finished;
   expect(signal.aborted).toBe(true);
 });
+
+it('registers the full agentic toolset (coding, swarm, schedules, memory, research)', async () => {
+  const f = fixture();
+  const network = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(
+      completion({ role: 'assistant', content: 'All tools ready.' }),
+    );
+  const events = await lastValueFrom(f.agent.run(f.input).pipe(toArray()));
+  expect(events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: EventType.RUN_FINISHED }),
+    ]),
+  );
+  expect(network).toHaveBeenCalledTimes(1);
+  const request = JSON.parse(String(network.mock.calls[0][1]?.body));
+  const names = (request.tools ?? []).map((t: any) => t.function?.name);
+  for (const name of [
+    'str_replace_editor',
+    'bash',
+    'search_files',
+    'code_interpreter',
+    'save_session_memory',
+    'save_global_memory',
+    'opencode_task',
+    'run_subagents',
+    'manage_schedule',
+    'search_web',
+    'read_public_page',
+  ]) {
+    expect(names).toContain(name);
+  }
+});
+
+it('drops folder-bound tools when the folder toggle is off but keeps memory', async () => {
+  const f = fixture();
+  f.store.updateSettings({ codingEnabled: false });
+  const network = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(
+      completion({ role: 'assistant', content: 'Chat-only mode.' }),
+    );
+  await lastValueFrom(f.agent.run(f.input).pipe(toArray()));
+  const request = JSON.parse(String(network.mock.calls[0][1]?.body));
+  const names = (request.tools ?? []).map((t: any) => t.function?.name);
+  for (const name of [
+    'str_replace_editor',
+    'bash',
+    'search_files',
+    'code_interpreter',
+    'opencode_task',
+    'run_subagents',
+  ]) {
+    expect(names).not.toContain(name);
+  }
+  for (const name of ['save_session_memory', 'save_global_memory', 'manage_schedule']) {
+    expect(names).toContain(name);
+  }
+});

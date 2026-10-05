@@ -13,6 +13,7 @@ import {
   Globe,
   Server,
   Cpu,
+  FolderOpen,
 } from 'lucide-react';
 import type { Dot, Memory, State, WorkspaceState, Connector } from '../shared/types';
 import { COMPUTER_ENVIRONMENTS } from '../shared/computer-types';
@@ -31,7 +32,8 @@ export interface ModelInfo {
   tag?: string;
 }
 
-export const KNOWN_MODELS: ModelInfo[] = [
+/** Curated metadata overlay — only applied when the id matches a live provider model. */
+const KNOWN_MODEL_META: ModelInfo[] = [
   // DeepSeek
   { id: 'deepseek-chat', name: 'deepseek-chat', provider: 'DeepSeek', desc: 'V3 architecture with fast inference, coding, and chat', tag: 'Fast Chat' },
   { id: 'deepseek-reasoner', name: 'deepseek-reasoner', provider: 'DeepSeek', desc: 'R1 deep reasoning engine with thorough step-by-step thinking', tag: 'Deep Thinking' },
@@ -87,23 +89,6 @@ export const KNOWN_MODELS: ModelInfo[] = [
   { id: 'opencode/space-bunny-free', name: 'space-bunny-free', provider: 'OpenCode Free', desc: 'Free lightweight versatile chat and coding agent', tag: 'Free Tier' },
   { id: 'opencode/big-pickle', name: 'big-pickle', provider: 'OpenCode Free', desc: 'Free 200k context flagship reasoning engine', tag: 'Free Tier' },
 ];
-
-const quickPresets = [
-  'auto-code',
-  'auto-complex',
-  'opencode/fledge-alpha-free',
-  'opencode/ling-3.1-flash-free',
-  'opencode/big-pickle',
-  'deepseek-chat',
-  'deepseek-reasoner',
-  'deepseek-v4-pro',
-  'kimi-k2.6',
-  'qwen3.8-27b',
-  'gemini-2.5-pro',
-  'claude-3-7-sonnet',
-  'gpt-4o',
-];
-
 
 function getModelCategory(m: string): string {
   const lower = m.toLowerCase();
@@ -199,6 +184,9 @@ export function WorkspaceDialog({
   const [codingDirectory, setCodingDirectory] = useState<string>(
     state.settings.codingDirectory || '',
   );
+  const [codingEnabled, setCodingEnabled] = useState<boolean>(
+    state.settings.codingEnabled !== false,
+  );
   const [bashPermission, setBashPermission] = useState<'auto' | 'ask' | 'deny'>(() => {
     try {
       const p = JSON.parse(state.settings.codingPermissions || '{}');
@@ -220,6 +208,34 @@ export function WorkspaceDialog({
   );
   const [opencodeStatus, setOpencodeStatus] = useState<any>(null);
   const [dirVerifyStatus, setDirVerifyStatus] = useState<string>('');
+  const [browsePath, setBrowsePath] = useState('');
+  const [browseParent, setBrowseParent] = useState('');
+  const [browseEntries, setBrowseEntries] = useState<Array<{ name: string; path: string }>>([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseError, setBrowseError] = useState('');
+  const [browseOpen, setBrowseOpen] = useState(false);
+
+  const loadBrowse = async (path?: string) => {
+    const target = (path ?? codingDirectory.trim()).trim();
+    setBrowseLoading(true);
+    setBrowseError('');
+    try {
+      const res = await fetch(`/api/workspace/browse${target ? `?path=${encodeURIComponent(target)}` : ''}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setBrowseError(data?.error || 'Cannot list folders on this device.');
+        return;
+      }
+      setBrowsePath(data.path);
+      setBrowseParent(data.parent);
+      setBrowseEntries(data.entries ?? []);
+      setBrowseOpen(true);
+    } catch {
+      setBrowseError('Could not reach server to browse folders.');
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
 
   // Dual-layer memory state
   const [sessionMemories, setSessionMemories] = useState<any[]>([]);
@@ -352,7 +368,19 @@ export function WorkspaceDialog({
   ]);
   const container = useRef<HTMLElement>(null);
 
-  const filteredModels = KNOWN_MODELS.filter((m) => {
+  const knownMetaById = new Map(KNOWN_MODEL_META.map((m) => [m.id, m]));
+  /** Original provider models first — metadata overlay only when the id matches. */
+  const liveModels: ModelInfo[] = modelOptions.map((id) => {
+    const known = knownMetaById.get(id);
+    if (known) return known;
+    return {
+      id,
+      name: id,
+      provider: getModelCategory(id),
+      desc: 'Available on your configured provider.',
+    };
+  });
+  const filteredModels = liveModels.filter((m) => {
     const matchesFilter =
       modelFilter === 'All' ||
       m.provider.toLowerCase().includes(modelFilter.toLowerCase()) ||
@@ -365,6 +393,15 @@ export function WorkspaceDialog({
       m.desc.toLowerCase().includes(query);
     return matchesFilter && matchesQuery;
   });
+  /** Specialist quick picks derived from the live provider list. */
+  const dynamicPresets = (() => {
+    const picks: string[] = [];
+    for (const id of ['auto-code', 'auto-complex', ...modelOptions]) {
+      if (!picks.includes(id)) picks.push(id);
+      if (picks.length >= 8) break;
+    }
+    return picks;
+  })();
 
   useEffect(() => {
     fetch('/api/models')
@@ -468,7 +505,7 @@ export function WorkspaceDialog({
         >
           ✕
         </button>
-        <span className="eyebrow">OPENDOTS TEMPLATE</span>
+        <span className="eyebrow">DOSHBOT</span>
         <h2 id="dialog-title">{title}</h2>
         <form
           onSubmit={async (e) => {
@@ -531,6 +568,7 @@ export function WorkspaceDialog({
                 twilioPhoneNumber: twilioPhoneNumber.trim() || null,
                 connectors: JSON.stringify(connectors),
                 codingDirectory: codingDirectory.trim() || null,
+                codingEnabled,
                 codingPermissions: JSON.stringify({ bash: bashPermission, edits: editsPermission }),
                 opencodeVariant: opencodeVariant.trim() || null,
               };
@@ -803,7 +841,7 @@ export function WorkspaceDialog({
                 </datalist>
 
                 <div className="model-presets">
-                  {quickPresets.map((preset) => (
+                  {dynamicPresets.map((preset) => (
                     <button
                       key={preset}
                       type="button"
@@ -813,7 +851,7 @@ export function WorkspaceDialog({
                       {preset}
                     </button>
                   ))}
-                  {model && !quickPresets.includes(model) && (
+                  {model && !dynamicPresets.includes(model) && (
                     <span className="model-preset-pill active">
                       Custom: {model}
                     </span>
@@ -1113,7 +1151,7 @@ export function WorkspaceDialog({
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                         <strong style={{ fontSize: '12px', color: '#1c1c1e' }}>OpenCode Engine Connected</strong>
                         <span className="line-option-tag" style={{ color: '#4a6572' }}>
-                          {opencodeStatus.freeModels?.length || 10} Free Models
+                          {opencodeStatus.freeModels?.length ?? 0} Free Models
                         </span>
                       </div>
                       <p className="muted" style={{ margin: '0 0 8px', fontSize: '11px' }}>
@@ -1250,6 +1288,32 @@ export function WorkspaceDialog({
                     DoshBot connects directly to your local file system for native code editing, file searching, and terminal command execution.
                   </p>
 
+                  <div className="callout-card" style={{ padding: '12px 14px', borderRadius: '12px', background: '#ffffff', border: '1px solid #e5e5ea', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: 600 }}>Folder tools</div>
+                      <div className="muted" style={{ fontSize: '11px' }}>
+                        {codingEnabled ? 'With folder — agent can read, edit and run local files.' : 'No folder — pure chat, no local file or shell access.'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={codingEnabled}
+                      onClick={() => setCodingEnabled(!codingEnabled)}
+                      style={{
+                        minWidth: 52,
+                        borderRadius: 999,
+                        background: codingEnabled ? '#111' : '#e5e5e5',
+                        color: codingEnabled ? '#fff' : '#111',
+                        border: '1px solid #111',
+                        fontSize: 11,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {codingEnabled ? 'On' : 'Off'}
+                    </button>
+                  </div>
+
                   <div className="callout-card" style={{ padding: '14px 16px', borderRadius: '12px', background: '#ffffff', border: '1px solid #e5e5ea', marginBottom: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                       <label className="field-label" style={{ fontSize: '11px', margin: 0 }}>Active Project Root Directory</label>
@@ -1268,6 +1332,17 @@ export function WorkspaceDialog({
                         }}
                         style={{ flex: 1, fontFamily: 'monospace', fontSize: '12px' }}
                       />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (browseOpen) setBrowseOpen(false);
+                          else void loadBrowse();
+                        }}
+                        disabled={browseLoading}
+                        style={{ fontSize: '11.5px', padding: '6px 14px' }}
+                      >
+                        {browseLoading ? 'Browsing…' : browseOpen ? 'Hide' : 'Browse…'}
+                      </button>
                       <button
                         type="button"
                         className="button"
@@ -1297,6 +1372,33 @@ export function WorkspaceDialog({
                       <p style={{ margin: 0, fontSize: '11px', color: dirVerifyStatus.includes('verified') ? '#4a6572' : '#991b1b' }}>
                         {dirVerifyStatus}
                       </p>
+                    )}
+                    {browseOpen && (
+                      <div className="dir-current" style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', marginTop: 8 }}>
+                        <div title={browsePath} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {browsePath || '…'}
+                        </div>
+                        {browseError && <div className="dir-status">{browseError}</div>}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button type="button" disabled={browseLoading || !browseParent || browseParent === browsePath} onClick={() => void loadBrowse(browseParent)} style={{ fontSize: '11.5px', padding: '6px 12px' }}>
+                            ↑ Up
+                          </button>
+                          <button type="button" disabled={browseLoading || !browsePath} onClick={() => { setCodingDirectory(browsePath); setBrowseOpen(false); setDirVerifyStatus(''); }} style={{ fontSize: '11.5px', padding: '6px 12px' }}>
+                            Use this folder
+                          </button>
+                        </div>
+                        <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {browseLoading && <span className="chat-item-desc">Listing device folders…</span>}
+                          {!browseLoading && browseEntries.length === 0 && !browseError && (
+                            <span className="chat-item-desc">No subfolders here.</span>
+                          )}
+                          {browseEntries.map((e) => (
+                            <button key={e.path} type="button" title={e.path} style={{ justifyContent: 'flex-start', fontFamily: 'monospace', fontSize: '12px' }} onClick={() => void loadBrowse(e.path)}>
+                              <FolderOpen size={13} /> {e.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     )}
                     <p className="muted" style={{ margin: '6px 0 0', fontSize: '10.5px' }}>
                       All coding tools (<code>str_replace_editor</code>, <code>bash</code>, <code>search_files</code>) operate inside this directory path.
@@ -1827,7 +1929,7 @@ export function WorkspaceDialog({
                         <div className="line-option-content">
                           <div className="line-option-header">
                             <span className="line-option-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <Plug size={14} style={{ color: c.enabled ? 'var(--blue-dark, #3b82f6)' : '#888' }} />
+                              <Plug size={14} style={{ color: c.enabled ? 'var(--blue-dark, #111)' : '#888' }} />
                               {c.name}
                             </span>
                             <span className="line-option-tag" style={{ textTransform: 'none' }}>
@@ -1974,7 +2076,7 @@ export function WorkspaceDialog({
                     Work Scheduling & Automations Engine
                   </label>
                   <p className="muted" style={{ margin: '0 0 12px', fontSize: '11px' }}>
-                    OpenWork background scheduled automations and headless worker execution.
+                    DoshBot background scheduled automations and headless worker execution.
                   </p>
 
                   <div className="line-option-list" style={{ marginBottom: '16px' }}>
@@ -1983,14 +2085,14 @@ export function WorkspaceDialog({
                         <div className="line-option-content">
                           <div className="line-option-header">
                             <span className="line-option-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <Clock3 size={14} style={{ color: task.status === 'running' ? '#3b82f6' : task.status === 'completed' ? '#10b981' : '#f59e0b' }} />
+                              <Clock3 size={14} style={{ color: task.status === 'running' ? '#111' : task.status === 'completed' ? '#111' : '#555' }} />
                               {task.prompt.slice(0, 50)}{task.prompt.length > 50 ? '…' : ''}
                             </span>
                             <span className="line-option-tag" style={{ textTransform: 'capitalize' }}>
                               {task.status}
                             </span>
                             {task.intervalSeconds && (
-                              <span className="line-option-tag" style={{ color: 'var(--blue-dark, #3b82f6)' }}>
+                              <span className="line-option-tag" style={{ color: 'var(--blue-dark, #111)' }}>
                                 Every {Math.round(task.intervalSeconds / 60)}m
                               </span>
                             )}
@@ -2049,7 +2151,7 @@ export function WorkspaceDialog({
                     )}
                   </div>
 
-                  <div className="callout-card" style={{ padding: '12px 14px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div className="callout-card" style={{ padding: '12px 14px', borderRadius: '12px', background: '#ffffff', border: '1px solid #e5e5ea' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
                       <Plus size={14} />
                       <strong style={{ fontSize: '12px' }}>Create Scheduled Automation</strong>

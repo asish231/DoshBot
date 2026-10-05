@@ -70,7 +70,62 @@ function isImageMime(mime: string, name: string): boolean {
 function isTextReadable(mime: string, name: string): boolean {
   if (mime.startsWith('text/')) return true;
   if (mime.includes('json') || mime.includes('javascript') || mime.includes('typescript')) return true;
-  return /\.(ts|tsx|js|jsx|py|go|rs|java|rb|php|css|html|md|txt|json|yml|yaml|toml|ini|sh|sql|xml|csv)$/i.test(name);
+  return /\.(ts|tsx|js|jsx|py|go|rs|java|rb|php|c|h|cpp|hpp|cs|swift|kt|kts|dart|lua|r|vue|svelte|css|scss|less|html|md|mdx|txt|json|jsonl|yml|yaml|toml|ini|cfg|sh|bash|zsh|sql|xml|csv|tsv|dockerfile|makefile|gradle|properties|env)$/i.test(name);
+}
+
+/** Models with no vision input — images sent to these arrive as text only. */
+function isVisionCapableModel(model: string): boolean {
+  const m = model.toLowerCase();
+  if (m.includes('deepseek-chat') || m.includes('deepseek-reasoner')) return false;
+  if (m.includes('deepseek-r1') || m.includes('deepseek-v3') && !m.includes('flash')) return false;
+  return true;
+}
+
+/**
+ * Downscale large images client-side so vision models receive an intact
+ * (never truncated) data URL. Mirrors OpenCode's drag-drop attach behaviour:
+ * screenshots stay PNG, photos compress to JPEG. Max side 1568px.
+ */
+function downscaleImage(file: File): Promise<{ dataUrl: string; mime: string }> {
+  return new Promise((resolve) => {
+    const fallback = () => {
+      const r = new FileReader();
+      r.onload = () => resolve({ dataUrl: String(r.result || ''), mime: file.type || 'image/png' });
+      r.readAsDataURL(file);
+    };
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const MAX = 1568;
+          const scale = Math.min(1, MAX / Math.max(img.width || 1, img.height || 1));
+          const w = Math.max(1, Math.round((img.width || 1) * scale));
+          const h = Math.max(1, Math.round((img.height || 1) * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('no 2d context');
+          ctx.drawImage(img, 0, 0, w, h);
+          URL.revokeObjectURL(url);
+          const srcMime = file.type || 'image/png';
+          const outMime = srcMime === 'image/png' || srcMime === 'image/webp' ? srcMime : 'image/jpeg';
+          resolve({ dataUrl: canvas.toDataURL(outMime, 0.85), mime: outMime });
+        } catch {
+          URL.revokeObjectURL(url);
+          fallback();
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        fallback();
+      };
+      img.src = url;
+    } catch {
+      fallback();
+    }
+  });
 }
 
 function formatModelName(model: string): string {
@@ -200,6 +255,34 @@ export function Chat({
   const [dirStatus, setDirStatus] = useState('');
   const [dirIsGit, setDirIsGit] = useState(false);
   const [dirSaving, setDirSaving] = useState(false);
+  const [browsePath, setBrowsePath] = useState('');
+  const [browseParent, setBrowseParent] = useState('');
+  const [browseEntries, setBrowseEntries] = useState<Array<{ name: string; path: string }>>([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseError, setBrowseError] = useState('');
+  const [browseOpen, setBrowseOpen] = useState(false);
+
+  const loadBrowse = async (path?: string) => {
+    const target = (path ?? dirDraft.trim() ?? fullDirPath ?? '').trim();
+    setBrowseLoading(true);
+    setBrowseError('');
+    try {
+      const res = await fetch(`/api/workspace/browse${target ? `?path=${encodeURIComponent(target)}` : ''}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setBrowseError(data?.error || 'Cannot list folders on this device.');
+        return;
+      }
+      setBrowsePath(data.path);
+      setBrowseParent(data.parent);
+      setBrowseEntries(data.entries ?? []);
+      setBrowseOpen(true);
+    } catch {
+      setBrowseError('Could not reach server to browse folders.');
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
@@ -292,11 +375,8 @@ export function Chat({
         void send('/mcp');
       }
     } else if (cmd.id === 'subagents') {
-      if (onOpenSettings) {
-        onOpenSettings('subagents');
-      } else {
-        void send('/subagents');
-      }
+      setDraft('/subagents ');
+      textareaRef.current?.focus();
     } else if (cmd.id === 'help') {
       void send('/help');
     } else if (cmd.placeholder) {
@@ -363,6 +443,7 @@ export function Chat({
   ]);
 
   const [connectedDir, setConnectedDir] = useState<string>('');
+  const [codingEnabled, setCodingEnabled] = useState(true);
 
   useEffect(() => {
     fetch('/api/models')
@@ -383,6 +464,7 @@ export function Chat({
           const parts = data.directory.split('/');
           setConnectedDir(parts[parts.length - 1] || data.directory);
           setDirIsGit(!!data.isGit);
+          if (typeof data.codingEnabled === 'boolean') setCodingEnabled(data.codingEnabled);
         }
       })
       .catch(() => {});
@@ -411,8 +493,21 @@ export function Chat({
         const parts = data.directory.split('/');
         setConnectedDir(parts[parts.length - 1] || data.directory);
         setDirIsGit(!!data.isGit);
+        if (typeof data.codingEnabled === 'boolean') setCodingEnabled(data.codingEnabled);
       }
     } catch {}
+  };
+
+  const toggleFolderTools = async () => {
+    const next = !codingEnabled;
+    setCodingEnabled(next);
+    try {
+      await api('/settings', 'PATCH', { codingEnabled: next });
+      onSaved();
+    } catch {
+      setCodingEnabled(!next);
+      setDirStatus('Could not save folder toggle.');
+    }
   };
 
   const handleConnectDirectory = async () => {
@@ -447,10 +542,11 @@ export function Chat({
     }
   };
 
-  const handleFilesSelected = async (files: FileList | null, forceImage = false) => {
+  const handleFilesSelected = async (files: FileList | File[] | null, forceImage = false) => {
     if (!files || files.length === 0) return;
+    const list = Array.from(files).slice(0, 8);
     const next: ChatAttachment[] = [];
-    for (const file of Array.from(files).slice(0, 5)) {
+    for (const file of list) {
       if (file.size > 8 * 1024 * 1024) {
         setError(`"${file.name}" exceeds 8MB and was skipped.`);
         continue;
@@ -459,15 +555,17 @@ export function Chat({
       const mime = file.type || 'application/octet-stream';
       const image = forceImage || isImageMime(mime, file.name);
       if (image) {
-        const dataUrl = await new Promise<string>((resolve) => {
-          const r = new FileReader();
-          r.onload = () => resolve(String(r.result || ''));
-          r.readAsDataURL(file);
-        });
-        next.push({ id, name: file.name, mime, size: file.size, kind: 'image', dataUrl });
-      } else if (isTextReadable(mime, file.name) && file.size < 500 * 1024) {
+        const { dataUrl, mime: outMime } = await downscaleImage(file);
+        if (!dataUrl) {
+          setError(`"${file.name}" could not be read as an image.`);
+          continue;
+        }
+        next.push({ id, name: file.name, mime: outMime, size: file.size, kind: 'image', dataUrl });
+      } else if (isTextReadable(mime, file.name) && file.size < 1024 * 1024) {
         const textContent = await file.text().catch(() => '');
         next.push({ id, name: file.name, mime, size: file.size, kind: 'text', textContent: textContent.slice(0, 60000) });
+      } else if (mime === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        next.push({ id, name: file.name, mime: mime === 'application/octet-stream' ? 'application/pdf' : mime, size: file.size, kind: 'file' });
       } else {
         next.push({ id, name: file.name, mime, size: file.size, kind: 'file' });
       }
@@ -485,11 +583,18 @@ export function Chat({
     const parts: string[] = ['\n\n--- Attached files ---'];
     for (const a of attachments) {
       if (a.kind === 'image' && a.dataUrl) {
-        parts.push(`\n[Attached image: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB)]\n![${a.name}](${a.dataUrl.slice(0, 200000)})`);
+        // Never truncate base64 — a sliced data URL is an unreadable image.
+        // Vision models (GPT-4o, Gemini, deepseek-flash, OpenCode vision models)
+        // read the markdown image below; text-only models (deepseek-chat/reasoner)
+        // should ask the user for a description instead of guessing.
+        parts.push(`\n[Attached image: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB)]\n![${a.name}](${a.dataUrl})`);
       } else if (a.kind === 'text' && a.textContent !== undefined) {
-        parts.push(`\n[Attached file: ${a.name}]\n\`\`\`\n${a.textContent}\n\`\`\``);
+        const truncated = a.textContent.length >= 60000 ? '\n[content truncated at 60000 chars — ask for the connected folder path to read the rest via str_replace_editor]' : '';
+        parts.push(`\n[Attached file: ${a.name}]\n\`\`\`\n${a.textContent}\n\`\`\`${truncated}`);
+      } else if (/pdf$/i.test(a.mime) || /\.pdf$/i.test(a.name)) {
+        parts.push(`\n[Attached file: ${a.name} (PDF, ${Math.round(a.size / 1024)}KB) — text was not inlined. If the file lives in the connected coding workspace, read it with str_replace_editor view or bash; otherwise ask the user to paste the relevant text or connect the folder.]`);
       } else {
-        parts.push(`\n[Attached file: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB) — binary, inspect via local coding workspace if available]`);
+        parts.push(`\n[Attached file: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB) — binary or too large to inline. If it lives in the connected coding workspace, inspect it with str_replace_editor view / bash; otherwise ask the user to paste the relevant excerpt or connect the folder.]`);
       }
     }
     return parts.join('\n');
@@ -637,13 +742,16 @@ export function Chat({
     let outgoing = text;
     if (trimmed.startsWith('/goal ')) {
       const goal = trimmed.slice(6).trim();
-      outgoing = `🎯 **Goal Mode Active**\nObjective: ${goal}\n\nPlease autonomously plan and execute all necessary steps, inspect tool evidence, verify completion, and do not stop until fully achieved.`;
+      outgoing = `**Goal Mode Active**\nObjective: ${goal}\n\nPlease autonomously plan and execute all necessary steps, inspect tool evidence, verify completion, and do not stop until fully achieved.`;
     } else if (trimmed.startsWith('/code ')) {
       const codeTask = trimmed.slice(6).trim();
-      outgoing = `💻 **Code Mode Active**\nTask: ${codeTask}\n\nPlease inspect the local project files, view or edit code using your str_replace_editor and bash tools, execute necessary commands (builds/tests), and verify the outcome.`;
+      outgoing = `**Code Mode Active**\nTask: ${codeTask}\n\nPlease inspect the local project files, view or edit code using your str_replace_editor and bash tools, execute necessary commands (builds/tests), and verify the outcome.`;
     } else if (trimmed.startsWith('/plan ')) {
       const planTask = trimmed.slice(6).trim();
-      outgoing = `📋 **Plan Mode Active**\nTask: ${planTask}\n\nPlease formulate an explicit, phased execution plan with milestone checkboxes and dependencies.`;
+      outgoing = `**Plan Mode Active**\nTask: ${planTask}\n\nPlease formulate an explicit, phased execution plan with milestone checkboxes and dependencies.`;
+    } else if (trimmed.startsWith('/subagents')) {
+      const mission = trimmed.slice(11).trim();
+      outgoing = `**Swarm Mode Active**\nMission: ${mission || '(see conversation context)'}\n\nSplit this mission into 2-5 independent parallel tracks and execute them with ONE run_subagents call (all tracks at once). Then synthesize the merged per-track results into a single final answer with evidence.`;
     } else if (trimmed.startsWith('/search ')) {
       const q = trimmed.slice(8).trim();
       outgoing = `Please search the web for "${q}" and summarize findings with source citations.`;
@@ -651,7 +759,7 @@ export function Chat({
       const url = trimmed.slice(8).trim();
       outgoing = `Please navigate to ${url} using your computer browser tool and inspect the page content.`;
     } else if (trimmed === '/help') {
-      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /compact, /memory, /mcp, /schedule, /search, /browse, /clear) and explain how to use them with MCP and local tools.`;
+      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /subagents, /compact, /memory, /mcp, /schedule, /search, /browse, /clear) and explain how to use them with MCP and local tools.`;
     }
 
     const attachmentContext = buildAttachmentContext();
@@ -979,7 +1087,19 @@ export function Chat({
             <span>{compactMessage}</span>
           </div>
         )}
-        <div className="chat-composer-box" style={{ position: 'relative' }}>
+        <div
+          className="chat-composer-box"
+          style={{ position: 'relative' }}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            if (e.dataTransfer.files.length > 0) {
+              e.preventDefault();
+              void handleFilesSelected(e.dataTransfer.files);
+            }
+          }}
+        >
           {slashMenuOpen && (
             <SlashCommandsMenu
               filter={draft}
@@ -1012,15 +1132,27 @@ export function Chat({
               ))}
             </div>
           )}
+          {attachments.some((a) => a.kind === 'image') && !isVisionCapableModel(currentModel) && (
+            <div className="dir-status" style={{ margin: '0 0 8px' }}>
+              {currentModel} can&apos;t see images (DeepSeek chat/reasoner are text-only). Describe the image in words, or switch to a vision model such as deepseek-flash, GPT-4o or Gemini.
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             aria-label="Message your Dot"
-            placeholder={`Message ${dot.name} — type / for commands, + to attach files…`}
+            placeholder={`Message ${dot.name} — type / for commands, + to attach files… (drop or paste images too)`}
             rows={1}
             value={draft}
             maxLength={12000}
             onChange={(e) => handleDraftChange(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={(e) => {
+              const files = e.clipboardData.files;
+              if (files.length > 0) {
+                e.preventDefault();
+                void handleFilesSelected(files);
+              }
+            }}
           />
           <input
             ref={fileInputRef}
@@ -1079,14 +1211,14 @@ export function Chat({
                       <Paperclip size={15} />
                       <div className="chat-effort-col">
                         <span className="chat-item-name">Upload files</span>
-                        <span className="chat-item-desc">Code, docs, text up to 8MB</span>
+                        <span className="chat-item-desc">Code, docs, text up to 8MB — inlined for the agent</span>
                       </div>
                     </button>
                     <button type="button" className="chat-popover-item" onClick={() => imageInputRef.current?.click()}>
                       <ImageIcon size={15} />
                       <div className="chat-effort-col">
                         <span className="chat-item-name">Upload images</span>
-                        <span className="chat-item-desc">Screenshots, diagrams, UI</span>
+                        <span className="chat-item-desc">Screenshots, diagrams — auto-compressed, never truncated</span>
                       </div>
                     </button>
                     <button
@@ -1134,11 +1266,11 @@ export function Chat({
                     setDirStatus('');
                     setDirOpen(!dirOpen);
                   }}
-                  title={fullDirPath ? `Coding workspace: ${fullDirPath}. Click to change (Claude / DSH-style local folder).` : 'Connect a local folder to code in (Claude / DSH-style)'}
+                  title={codingEnabled ? (fullDirPath ? `Coding workspace: ${fullDirPath}. Click to change (Claude / DSH-style local folder).` : 'Connect a local folder to code in (Claude / DSH-style)') : 'Folder tools are off — click to turn them on.'}
                 >
                   <FolderGit2 size={14} />
-                  <span>{connectedDir || 'Connect folder'}</span>
-                  {dirIsGit && <span className="dir-git-dot" title="Git repo detected">●</span>}
+                  <span>{codingEnabled ? (connectedDir || 'Connect folder') : 'No folder'}</span>
+                  {codingEnabled && dirIsGit && <span className="dir-git-dot" title="Git repo detected">●</span>}
                 </button>
                 {dirOpen && (
                   <div className="chat-popover-menu dir-menu">
@@ -1147,8 +1279,31 @@ export function Chat({
                       <small>{dirIsGit ? 'git repo' : 'local fs'}</small>
                     </div>
                     <div className="dir-picker-body">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 0 8px' }}>
+                        <span className="chat-item-desc" style={{ margin: 0 }}>Folder tools</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={codingEnabled}
+                          title={codingEnabled ? 'Turn folder tools off (chat without local files)' : 'Turn folder tools on (chat with local files)'}
+                          onClick={() => void toggleFolderTools()}
+                          style={{
+                            minWidth: 52,
+                            borderRadius: 999,
+                            background: codingEnabled ? '#111' : '#e5e5e5',
+                            color: codingEnabled ? '#fff' : '#111',
+                            border: '1px solid #111',
+                            fontSize: 11,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {codingEnabled ? 'On' : 'Off'}
+                        </button>
+                      </div>
                       <p className="chat-item-desc" style={{ margin: '0 0 8px' }}>
-                        Agent runs <code>str_replace_editor</code>, <code>bash</code>, <code>code_interpreter</code> here.
+                        {codingEnabled
+                          ? <>Agent runs <code>str_replace_editor</code>, <code>bash</code>, <code>code_interpreter</code> here.</>
+                          : 'Folder tools are off — the agent chats without reading or editing local files.'}
                       </p>
                       <input
                         type="text"
@@ -1164,7 +1319,44 @@ export function Chat({
                         </div>
                       )}
                       {dirStatus && <div className="dir-status">{dirStatus}</div>}
+                      {browseOpen && (
+                        <div className="dir-current" style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
+                          <div title={browsePath} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {browsePath || '…'}
+                          </div>
+                          {browseError && <div className="dir-status">{browseError}</div>}
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button type="button" disabled={browseLoading || !browseParent || browseParent === browsePath} onClick={() => void loadBrowse(browseParent)}>
+                              ↑ Up
+                            </button>
+                            <button type="button" disabled={browseLoading || !browsePath} onClick={() => { setDirDraft(browsePath); setBrowseOpen(false); setDirStatus(''); }}>
+                              Use this folder
+                            </button>
+                          </div>
+                          <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            {browseLoading && <span className="chat-item-desc">Listing device folders…</span>}
+                            {!browseLoading && browseEntries.length === 0 && !browseError && (
+                              <span className="chat-item-desc">No subfolders here.</span>
+                            )}
+                            {browseEntries.map((e) => (
+                              <button key={e.path} type="button" title={e.path} style={{ justifyContent: 'flex-start', fontFamily: 'monospace', fontSize: '12px' }} onClick={() => void loadBrowse(e.path)}>
+                                <FolderOpen size={13} /> {e.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <div className="dir-actions">
+                        <button
+                          type="button"
+                          disabled={browseLoading}
+                          onClick={() => {
+                            if (browseOpen) setBrowseOpen(false);
+                            else void loadBrowse();
+                          }}
+                        >
+                          {browseLoading ? 'Browsing…' : browseOpen ? 'Hide folders' : 'Browse…'}
+                        </button>
                         <button
                           type="button"
                           className="primary small"
