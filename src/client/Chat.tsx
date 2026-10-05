@@ -362,6 +362,32 @@ export function Chat({
     }
   };
 
+  const sendSchedule = async (intervalSeconds: number | null, objective: string) => {
+    if (!objective && intervalSeconds !== null) {
+      setError('Tell me what to schedule after the interval, e.g. /schedule 3600 check my inbox');
+      return;
+    }
+    setError('');
+    setRunning(true);
+    const commandLine = `/schedule${intervalSeconds ? ` ${intervalSeconds}` : ''}${objective ? ` ${objective}` : ''}`;
+    const instruction = `\n\nUnfold this schedule request: call manage_schedule with action 'draft', a precise instructions text for the objective, and intervalSeconds ${intervalSeconds ?? 'null'} (null = ask me for the interval first). Then confirm with ask_question whether to start it, and only start on explicit approval.`;
+    agent.addMessage({
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: commandLine + instruction,
+    });
+    try {
+      const result = await copilotkit.runAgent({ agent });
+      if (!result.newMessages.some((message) => message.role === 'assistant'))
+        throw new Error('The current turn returned no response.');
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Scheduling failed.');
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const handleSelectSlashCommand = (cmd: SlashCommand) => {
     setSlashMenuOpen(false);
     if (cmd.id === 'compact') {
@@ -697,6 +723,15 @@ export function Chat({
         setCompactMessage('Opening MCP Servers configuration…');
         setTimeout(() => setCompactMessage(null), 3000);
       }
+      return;
+    }
+    if (trimmed.startsWith('/schedule')) {
+      const rest = trimmed.slice(9).trim();
+      const match = rest.match(/^(\d+)\s*(.*)$/);
+      const interval = match ? Number(match[1]) : null;
+      const objective = match ? match[2].trim() : rest;
+      setDraft('');
+      void sendSchedule(interval, objective);
       return;
     }
     if (trimmed.startsWith('/memory ')) {

@@ -74,6 +74,7 @@ import type {
   WorkspaceState,
 } from '../shared/types';
 import { api, ApiError, authHeaders, setToken } from './api';
+import { SlashCommandsMenu, SLASH_COMMANDS, type SlashCommand } from './SlashCommandsMenu';
 import { Mascot } from './Mascot';
 import { Chat } from './Chat';
 import { ThreadList } from './ThreadList';
@@ -151,6 +152,24 @@ export function App() {
   const [search, setSearch] = useState('');
   const [taskDetail, setTaskDetail] = useState<Detail>();
   const [homeModelOpen, setHomeModelOpen] = useState(false);
+  const [homeSlashOpen, setHomeSlashOpen] = useState(false);
+  const [homeSlashIndex, setHomeSlashIndex] = useState(0);
+  const homeSlashCommands = SLASH_COMMANDS.filter((c) =>
+    ['goal', 'code', 'plan', 'subagents', 'memory', 'schedule', 'search', 'browse'].includes(c.id),
+  );
+  const handleHeroPromptChange = (text: string) => {
+    setPrompt(text);
+    if (text.startsWith('/') && !text.includes('\n')) {
+      setHomeSlashOpen(true);
+      setHomeSlashIndex(0);
+    } else {
+      setHomeSlashOpen(false);
+    }
+  };
+  const handleHeroSlashSelect = (cmd: SlashCommand) => {
+    setHomeSlashOpen(false);
+    setPrompt(cmd.placeholder ? cmd.placeholder : `${cmd.command} `);
+  };
   const [homeEffortOpen, setHomeEffortOpen] = useState(false);
   const [homeAudioOpen, setHomeAudioOpen] = useState(false);
   const [homeModelSearch, setHomeModelSearch] = useState('');
@@ -865,15 +884,53 @@ export function App() {
                       }
                       value={prompt}
                       maxLength={4000}
-                      onChange={(e) => setPrompt(e.target.value)}
+                      onChange={(e) => handleHeroPromptChange(e.target.value)}
                       disabled={!configured}
                       onKeyDown={(e) => {
+                        if (homeSlashOpen) {
+                          const filtered = homeSlashCommands.filter(
+                            (cmd) =>
+                              cmd.command.toLowerCase().includes(prompt.slice(1).toLowerCase()) ||
+                              cmd.name.toLowerCase().includes(prompt.slice(1).toLowerCase()),
+                          );
+                          if (filtered.length > 0) {
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault();
+                              setHomeSlashIndex((prev) => (prev + 1) % filtered.length);
+                              return;
+                            }
+                            if (e.key === 'ArrowUp') {
+                              e.preventDefault();
+                              setHomeSlashIndex((prev) => (prev - 1 + filtered.length) % filtered.length);
+                              return;
+                            }
+                            if (e.key === 'Enter' || e.key === 'Tab') {
+                              e.preventDefault();
+                              handleHeroSlashSelect(filtered[Math.min(homeSlashIndex, filtered.length - 1)]);
+                              return;
+                            }
+                          }
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setHomeSlashOpen(false);
+                            return;
+                          }
+                        }
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
                           e.currentTarget.form?.requestSubmit();
                         }
                       }}
                     />
+                    {homeSlashOpen && (
+                      <SlashCommandsMenu
+                        filter={prompt}
+                        selectedIndex={homeSlashIndex}
+                        onSelect={handleHeroSlashSelect}
+                        onClose={() => setHomeSlashOpen(false)}
+                        commands={homeSlashCommands}
+                      />
+                    )}
                     <div className="chat-composer-footer">
                       <div className="chat-composer-left">
                         <button

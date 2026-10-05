@@ -1,3 +1,0 @@
-[     301ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=05a6963f:15804
-[     343ms] [WARNING] Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information. @ http://127.0.0.1:5173/node_modules/.vite/deps/directive-ClG-8OD5.js?v=05a6963f:31925
-[  193802ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5173/api/nonexistent-probe:0

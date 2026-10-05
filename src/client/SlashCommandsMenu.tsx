@@ -113,6 +113,7 @@ export interface SlashCommandsMenuProps {
   selectedIndex: number;
   onSelect: (command: SlashCommand) => void;
   onClose: () => void;
+  commands?: SlashCommand[];
 }
 
 export function SlashCommandsMenu({
@@ -120,12 +121,13 @@ export function SlashCommandsMenu({
   selectedIndex,
   onSelect,
   onClose,
+  commands = SLASH_COMMANDS,
 }: SlashCommandsMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Filter commands by input
   const query = filter.startsWith('/') ? filter.slice(1).toLowerCase() : filter.toLowerCase();
-  const filtered = SLASH_COMMANDS.filter(
+  const filtered = commands.filter(
     (cmd) =>
       cmd.command.toLowerCase().includes(query) ||
       cmd.name.toLowerCase().includes(query) ||
