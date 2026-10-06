@@ -15,6 +15,6 @@ data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
-
+*.log
 # Local hosted-project selection
 .copilotkit/
