@@ -1311,12 +1311,12 @@ h3 {
 .modal {
   position: relative;
   width: 100%;
-  max-width: 460px;
-  background: #fffefc;
-  border: 1px solid #eeece8;
-  border-radius: 17px;
-  padding: 36px;
-  box-shadow: 0 20px 80px #30344419;
+  max-width: 700px;
+  background: #ffffff;
+  border: 4px solid #000;
+  border-radius: 0;
+  padding: 40px;
+  box-shadow: 10px 10px 0 #000;
   max-height: calc(100dvh - 48px);
   overflow: auto;
 }
@@ -4384,35 +4384,39 @@ copilotkit-web-inspector,
 
 .settings-tabs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 8px;
-  margin-bottom: 16px;
+  gap: 8px;
+  border-bottom: 2px solid #000;
+  padding-bottom: 12px;
+  margin-bottom: 24px;
 }
 
 .settings-tab-btn {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--muted);
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #555;
+  background: #fff;
+  border: 1px solid #000;
+  border-radius: 0;
+  padding: 8px 14px;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s ease;
+  transition: all 0.1s ease;
 }
 
 .settings-tab-btn:hover {
-  color: var(--ink);
-  background: #f4f4f9;
+  color: #000;
+  background: #f4f4f4;
+  transform: translate(-2px, -2px);
+  box-shadow: 2px 2px 0 #000;
 }
 
 .settings-tab-btn.active {
-  color: var(--blue-dark);
-  background: var(--lavender);
-  font-weight: 600;
+  color: #fff;
+  background: #000;
+  border-color: #000;
 }
 
 /* ==========================================================================
@@ -5820,3 +5824,68 @@ copilotkit-web-inspector,
 .dir-actions { display: flex; gap: 8px; align-items: center; }
 .dir-actions .primary.small { background: #1c1c1e; color: #fff; border: 0; border-radius: 8px; padding: 7px 12px; font-size: 12px; }
 .dir-git-dot { color: #22c55e; font-size: 10px; }
+. l i n e - o p t i o n - l i s t   { 
+     d i s p l a y :   f l e x ; 
+     f l e x - d i r e c t i o n :   c o l u m n ; 
+     g a p :   8 p x ; 
+ } 
+ . l i n e - o p t i o n - r o w   { 
+     d i s p l a y :   f l e x ; 
+     j u s t i f y - c o n t e n t :   s p a c e - b e t w e e n ; 
+     p a d d i n g :   1 6 p x ; 
+     b o r d e r :   2 p x   s o l i d   # 0 0 0 ; 
+     b a c k g r o u n d :   # f f f ; 
+     t r a n s i t i o n :   a l l   0 . 1 s   e a s e ; 
+ } 
+ . l i n e - o p t i o n - r o w : h o v e r   { 
+     b a c k g r o u n d :   # f 4 f 4 f 4 ; 
+     b o x - s h a d o w :   2 p x   2 p x   0   # 0 0 0 ; 
+     t r a n s f o r m :   t r a n s l a t e ( - 1 p x ,   - 1 p x ) ; 
+ } 
+ . l i n e - o p t i o n - r o w . a c t i v e   { 
+     b o r d e r - l e f t :   6 p x   s o l i d   # 0 0 0 ; 
+     b a c k g r o u n d :   # f a f a f a ; 
+ } 
+ . l i n e - o p t i o n - c o n t e n t   { 
+     d i s p l a y :   f l e x ; 
+     f l e x - d i r e c t i o n :   c o l u m n ; 
+     g a p :   4 p x ; 
+ } 
+ . l i n e - o p t i o n - h e a d e r   { 
+     d i s p l a y :   f l e x ; 
+     a l i g n - i t e m s :   c e n t e r ; 
+     g a p :   8 p x ; 
+ } 
+ . l i n e - o p t i o n - t i t l e   { 
+     f o n t - w e i g h t :   7 0 0 ; 
+     f o n t - s i z e :   1 3 p x ; 
+     c o l o r :   # 0 0 0 ; 
+     t e x t - t r a n s f o r m :   u p p e r c a s e ; 
+ } 
+ . l i n e - o p t i o n - t a g   { 
+     f o n t - s i z e :   1 0 p x ; 
+     f o n t - w e i g h t :   6 0 0 ; 
+     c o l o r :   # f f f ; 
+     b a c k g r o u n d :   # 0 0 0 ; 
+     p a d d i n g :   2 p x   6 p x ; 
+     t e x t - t r a n s f o r m :   u p p e r c a s e ; 
+ } 
+ . l i n e - o p t i o n - d e s c   { 
+     f o n t - s i z e :   1 2 p x ; 
+     c o l o r :   # 5 5 5 ; 
+     m a r g i n :   0 ; 
+ } 
+ . l i n e - o p t i o n - r a d i o   { 
+     d i s p l a y :   f l e x ; 
+     a l i g n - i t e m s :   c e n t e r ; 
+     j u s t i f y - c o n t e n t :   c e n t e r ; 
+     w i d t h :   1 6 p x ; 
+     h e i g h t :   1 6 p x ; 
+     b o r d e r :   2 p x   s o l i d   # 0 0 0 ; 
+ } 
+ . l i n e - o p t i o n - r a d i o - d o t   { 
+     w i d t h :   8 p x ; 
+     h e i g h t :   8 p x ; 
+     b a c k g r o u n d :   # 0 0 0 ; 
+ }  
+ 

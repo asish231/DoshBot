@@ -646,7 +646,7 @@ export function WorkspaceDialog({
                       padding: '8px 12px',
                       background: 'rgba(255,255,255,0.06)',
                       border: '1px solid rgba(255,255,255,0.12)',
-                      borderRadius: '8px',
+                      borderRadius: 0,
                       color: 'inherit',
                       fontSize: '13px',
                     }}
@@ -1144,8 +1144,8 @@ export function WorkspaceDialog({
                         marginBottom: '12px',
                         padding: '12px 14px',
                         background: '#ffffff',
-                        border: '1px solid #e5e5ea',
-                        borderRadius: '9px',
+                        border: '2px solid #000',
+                        borderRadius: 0,
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -1165,7 +1165,7 @@ export function WorkspaceDialog({
                           style={{
                             padding: '3px 8px',
                             borderRadius: '6px',
-                            border: '1px solid #e5e5ea',
+                            border: '2px solid #000',
                             background: '#ffffff',
                             fontSize: '11px',
                           }}
@@ -1288,7 +1288,7 @@ export function WorkspaceDialog({
                     DoshBot connects directly to your local file system for native code editing, file searching, and terminal command execution.
                   </p>
 
-                  <div className="callout-card" style={{ padding: '12px 14px', borderRadius: '12px', background: '#ffffff', border: '1px solid #e5e5ea', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div className="callout-card" style={{ padding: '12px 14px', borderRadius: 0, background: '#ffffff', border: '2px solid #000', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div>
                       <div style={{ fontSize: '12px', fontWeight: 600 }}>Folder tools</div>
                       <div className="muted" style={{ fontSize: '11px' }}>
@@ -1314,7 +1314,7 @@ export function WorkspaceDialog({
                     </button>
                   </div>
 
-                  <div className="callout-card" style={{ padding: '14px 16px', borderRadius: '12px', background: '#ffffff', border: '1px solid #e5e5ea', marginBottom: '16px' }}>
+                  <div className="callout-card" style={{ padding: '14px 16px', borderRadius: 0, background: '#ffffff', border: '2px solid #000', marginBottom: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                       <label className="field-label" style={{ fontSize: '11px', margin: 0 }}>Active Project Root Directory</label>
                       <span className="line-option-tag" style={{ color: '#4a6572' }}>
@@ -1428,8 +1428,8 @@ export function WorkspaceDialog({
                         onChange={(e) => setBashPermission(e.target.value as any)}
                         style={{
                           padding: '6px 10px',
-                          borderRadius: '8px',
-                          border: '1px solid #e5e5ea',
+                          borderRadius: 0,
+                          border: '2px solid #000',
                           background: '#ffffff',
                           fontSize: '11.5px',
                         }}
@@ -1455,8 +1455,8 @@ export function WorkspaceDialog({
                         onChange={(e) => setEditsPermission(e.target.value as any)}
                         style={{
                           padding: '6px 10px',
-                          borderRadius: '8px',
-                          border: '1px solid #e5e5ea',
+                          borderRadius: 0,
+                          border: '2px solid #000',
                           background: '#ffffff',
                           fontSize: '11.5px',
                         }}
@@ -1468,7 +1468,7 @@ export function WorkspaceDialog({
                     </div>
                   </div>
 
-                  <div className="callout-card" style={{ padding: '14px 16px', borderRadius: '12px', background: '#ffffff', border: '1px solid #e5e5ea' }}>
+                  <div className="callout-card" style={{ padding: '14px 16px', borderRadius: 0, background: '#ffffff', border: '2px solid #000' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                       <strong style={{ fontSize: '12px' }}>OpenCode Local Engine</strong>
                       <span className="line-option-tag" style={{ color: opencodeStatus?.available ? '#4a6572' : '#888' }}>
@@ -1489,7 +1489,7 @@ export function WorkspaceDialog({
                           style={{
                             padding: '3px 8px',
                             borderRadius: '6px',
-                            border: '1px solid #e5e5ea',
+                            border: '2px solid #000',
                             background: '#ffffff',
                             fontSize: '11px',
                           }}
@@ -1549,7 +1549,7 @@ export function WorkspaceDialog({
                     })}
                   </div>
 
-                  <div className="callout-card" style={{ padding: '14px 16px', borderRadius: '12px', background: '#ffffff', border: '1px solid #e5e5ea' }}>
+                  <div className="callout-card" style={{ padding: '14px 16px', borderRadius: 0, background: '#ffffff', border: '2px solid #000' }}>
                     <strong style={{ fontSize: '12px', display: 'block', marginBottom: '8px' }}>
                       Add Specialized Subagent
                     </strong>
@@ -1572,8 +1572,8 @@ export function WorkspaceDialog({
                             width: '100%',
                             padding: '8px 10px',
                             background: '#ffffff',
-                            border: '1px solid #e5e5ea',
-                            borderRadius: '8px',
+                            border: '2px solid #000',
+                            borderRadius: 0,
                             fontSize: '12px',
                           }}
                         >
@@ -1596,8 +1596,8 @@ export function WorkspaceDialog({
                             width: '100%',
                             padding: '8px 10px',
                             background: '#ffffff',
-                            border: '1px solid #e5e5ea',
-                            borderRadius: '8px',
+                            border: '2px solid #000',
+                            borderRadius: 0,
                             fontSize: '12px',
                           }}
                         >
@@ -1627,8 +1627,8 @@ export function WorkspaceDialog({
                             width: '100%',
                             padding: '8px 10px',
                             background: '#ffffff',
-                            border: '1px solid #e5e5ea',
-                            borderRadius: '8px',
+                            border: '2px solid #000',
+                            borderRadius: 0,
                             fontSize: '12px',
                           }}
                         >
@@ -1752,8 +1752,8 @@ export function WorkspaceDialog({
                         onChange={(e) => setNewGlobalMemCategory(e.target.value)}
                         style={{
                           padding: '6px 10px',
-                          borderRadius: '8px',
-                          border: '1px solid #e5e5ea',
+                          borderRadius: 0,
+                          border: '2px solid #000',
                           background: '#ffffff',
                           fontSize: '11px',
                         }}
@@ -1794,7 +1794,7 @@ export function WorkspaceDialog({
                           style={{
                             padding: '3px 8px',
                             borderRadius: '6px',
-                            border: '1px solid #e5e5ea',
+                            border: '2px solid #000',
                             background: '#ffffff',
                             fontSize: '11px',
                             maxWidth: '160px',
@@ -1872,8 +1872,8 @@ export function WorkspaceDialog({
                         onChange={(e) => setNewSessionMemCategory(e.target.value)}
                         style={{
                           padding: '6px 10px',
-                          borderRadius: '8px',
-                          border: '1px solid #e5e5ea',
+                          borderRadius: 0,
+                          border: '2px solid #000',
                           background: '#ffffff',
                           fontSize: '11px',
                         }}
@@ -1982,7 +1982,7 @@ export function WorkspaceDialog({
                     ))}
                   </div>
 
-                  <div className="callout-card" style={{ padding: '14px 16px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div className="callout-card" style={{ padding: '14px 16px', borderRadius: 0, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
                       <Plus size={14} />
                       <strong style={{ fontSize: '12px' }}>Add MCP Server</strong>
@@ -2151,7 +2151,7 @@ export function WorkspaceDialog({
                     )}
                   </div>
 
-                  <div className="callout-card" style={{ padding: '12px 14px', borderRadius: '12px', background: '#ffffff', border: '1px solid #e5e5ea' }}>
+                  <div className="callout-card" style={{ padding: '12px 14px', borderRadius: 0, background: '#ffffff', border: '2px solid #000' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
                       <Plus size={14} />
                       <strong style={{ fontSize: '12px' }}>Create Scheduled Automation</strong>
