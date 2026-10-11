@@ -47,6 +47,18 @@ export const STT_MODELS: SpeechToTextModel[] = [
   },
 ];
 
+interface BrowserSpeechRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: ((event: Event) => void) | null;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: ((event: Event) => void) | null;
+  start(): void;
+  stop(): void;
+}
+
 export function useSpeechToText(onTranscript: (text: string) => void) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -63,20 +75,24 @@ export function useSpeechToText(onTranscript: (text: string) => void) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
 
   const setSttModel = useCallback((modelId: string) => {
     setSttModelState(modelId);
     try {
       localStorage.setItem('opendots_stt_model', modelId);
-    } catch {}
+    } catch {
+      // localStorage unavailable (private mode/quota); keep in-memory value only
+    }
   }, []);
 
   const stopRecording = useCallback(() => {
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-      } catch {}
+      } catch {
+        // recognition already stopped or failed to start; nothing to recover
+      }
       recognitionRef.current = null;
       setIsRecording(false);
       return;
@@ -88,7 +104,9 @@ export function useSpeechToText(onTranscript: (text: string) => void) {
     ) {
       try {
         mediaRecorderRef.current.stop();
-      } catch {}
+      } catch {
+        // recorder already stopped; state update below still applies
+      }
       setIsRecording(false);
     }
   }, []);
@@ -98,9 +116,12 @@ export function useSpeechToText(onTranscript: (text: string) => void) {
 
     // 1. Browser Native Speech Recognition
     if (sttModel === 'browser-native') {
+      const speechWindow = window as Window & {
+        SpeechRecognition?: new () => BrowserSpeechRecognition;
+        webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+      };
       const SpeechRecognitionClass =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
+        speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
 
       if (SpeechRecognitionClass) {
         try {
@@ -113,7 +134,7 @@ export function useSpeechToText(onTranscript: (text: string) => void) {
             setIsRecording(true);
           };
 
-          recognition.onresult = (event: any) => {
+          recognition.onresult = (event) => {
             let fullText = '';
             for (let i = event.resultIndex; i < event.results.length; i++) {
               fullText += event.results[i][0].transcript;
@@ -123,7 +144,7 @@ export function useSpeechToText(onTranscript: (text: string) => void) {
             }
           };
 
-          recognition.onerror = (err: any) => {
+          recognition.onerror = (err) => {
             if (err.error !== 'no-speech') {
               setErrorMessage(`Speech recognition error: ${err.error}`);
             }
@@ -137,8 +158,11 @@ export function useSpeechToText(onTranscript: (text: string) => void) {
           recognitionRef.current = recognition;
           recognition.start();
           return;
-        } catch (err: any) {
-          console.warn('SpeechRecognition failed, falling back to MediaRecorder', err);
+        } catch (err) {
+          console.warn(
+            'SpeechRecognition failed, falling back to MediaRecorder',
+            err,
+          );
         }
       }
     }
@@ -193,37 +217,49 @@ export function useSpeechToText(onTranscript: (text: string) => void) {
             const dataUrl = reader.result as string;
             const base64Audio = dataUrl.split(',')[1];
             try {
-              const res = await api<{ text: string }>('/voice/transcribe', 'POST', {
-                audio: base64Audio,
-                mimeType: audioBlob.type || 'audio/webm',
-                model: sttModel,
-              });
+              const res = await api<{ text: string }>(
+                '/voice/transcribe',
+                'POST',
+                {
+                  audio: base64Audio,
+                  mimeType: audioBlob.type || 'audio/webm',
+                  model: sttModel,
+                },
+              );
 
               if (res.text && res.text.trim()) {
                 onTranscript(res.text.trim());
               }
-            } catch (err: any) {
+            } catch (err) {
               setErrorMessage(
-                err?.message || 'Failed to transcribe audio. Check API key.',
+                err instanceof Error && err.message
+                  ? err.message
+                  : 'Failed to transcribe audio. Check API key.',
               );
             } finally {
               setIsTranscribing(false);
             }
           };
           reader.readAsDataURL(audioBlob);
-        } catch (err: any) {
+        } catch (err) {
           setIsTranscribing(false);
-          setErrorMessage(err?.message || 'Audio processing error.');
+          setErrorMessage(
+            err instanceof Error && err.message
+              ? err.message
+              : 'Audio processing error.',
+          );
         }
       };
 
       mediaRecorderRef.current = recorder;
       recorder.start(250);
       setIsRecording(true);
-    } catch (err: any) {
+    } catch (err) {
       setIsRecording(false);
       setErrorMessage(
-        err?.message || 'Microphone access denied or unavailable.',
+        err instanceof Error && err.message
+          ? err.message
+          : 'Microphone access denied or unavailable.',
       );
     }
   }, [sttModel, onTranscript]);
@@ -241,7 +277,9 @@ export function useSpeechToText(onTranscript: (text: string) => void) {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
-        } catch {}
+        } catch {
+          // recognition already stopped or failed to start
+        }
       }
       if (
         mediaRecorderRef.current &&
@@ -249,7 +287,9 @@ export function useSpeechToText(onTranscript: (text: string) => void) {
       ) {
         try {
           mediaRecorderRef.current.stop();
-        } catch {}
+        } catch {
+          // recorder already stopped; tracks are still torn down below
+        }
       }
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());

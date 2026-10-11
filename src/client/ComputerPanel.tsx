@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dot } from '../shared/types';
 import type { ComputerAction, ComputerStatus } from '../shared/computer-types';
-import { COMPUTER_ENVIRONMENTS } from '../shared/computer-types';
 import { api } from './api';
 
 type Screen = {
@@ -96,6 +95,7 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
     }
   }, [base]);
   useEffect(() => {
+    const lifecycleNow = lifecycle.current;
     lifecycle.current.active = true;
     controller.current = new AbortController();
     let cancelled = false;
@@ -113,8 +113,8 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
     void poll();
     return () => {
       cancelled = true;
-      lifecycle.current.active = false;
-      lifecycle.current.revision++;
+      lifecycleNow.active = false;
+      lifecycleNow.revision++;
       controller.current?.abort();
       clearTimeout(timer);
     };
@@ -643,45 +643,40 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                   </label>
                 ),
               )}
-              <div className="computer-environment-select" style={{ marginTop: '12px' }}>
+              <div
+                className="computer-environment-select"
+                style={{ marginTop: '12px' }}
+              >
                 <span className="field-label" style={{ margin: '0 0 6px' }}>
                   Environment Profile
                 </span>
-                <div className="line-option-list" role="radiogroup" aria-label="Environment Profile">
-                  {COMPUTER_ENVIRONMENTS.map((env) => {
-                    const isSelected = (status.permissions.environment || 'ubuntu') === env.id;
-                    return (
-                      <div
-                        key={env.id}
-                        role="radio"
-                        tabIndex={0}
-                        aria-checked={isSelected}
-                        className={`line-option-row ${isSelected ? 'active' : ''}`}
-                        onClick={() => {
-                          if (!busy && status.configured) {
-                            void run('/permissions', { environment: env.id }, 'PATCH');
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if ((e.key === ' ' || e.key === 'Enter') && !busy && status.configured) {
-                            e.preventDefault();
-                            void run('/permissions', { environment: env.id }, 'PATCH');
-                          }
-                        }}
-                      >
-                        <div className="line-option-content">
-                          <div className="line-option-header">
-                            <span className="line-option-title">{env.name}</span>
-                            <span className="line-option-tag">{env.tag}</span>
-                          </div>
-                          <p className="line-option-desc">{env.desc}</p>
-                        </div>
-                        <div className="line-option-radio" aria-hidden="true">
-                          {isSelected && <div className="line-option-radio-dot" />}
-                        </div>
+                <div
+                  className="line-option-list"
+                  role="radiogroup"
+                  aria-label="Environment Profile"
+                >
+                  <div
+                    role="radio"
+                    tabIndex={0}
+                    aria-checked
+                    className="line-option-row active"
+                  >
+                    <div className="line-option-content">
+                      <div className="line-option-header">
+                        <span className="line-option-title">
+                          Hardened Computer (pinned image)
+                        </span>
+                        <span className="line-option-tag">Default</span>
                       </div>
-                    );
-                  })}
+                      <p className="line-option-desc">
+                        All computers run the same pinned sandbox image built by
+                        your Docker supervisor — see docs/COMPUTERS.md.
+                      </p>
+                    </div>
+                    <div className="line-option-radio" aria-hidden="true">
+                      <div className="line-option-radio-dot" />
+                    </div>
+                  </div>
                 </div>
               </div>
             </details>

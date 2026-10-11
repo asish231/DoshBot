@@ -340,7 +340,9 @@ export function PageDocument({
             onHome();
             onRefresh();
           } catch (e) {
-            setNotice(e instanceof Error ? e.message : 'Could not delete page.');
+            setNotice(
+              e instanceof Error ? e.message : 'Could not delete page.',
+            );
           }
         }}
       />

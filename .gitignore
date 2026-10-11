@@ -18,3 +18,9 @@ data/
 *.log
 # Local hosted-project selection
 .copilotkit/
+
+# Reference project clones for study
+reference/
+
+# Playwright CLI session artifacts
+.playwright-cli/

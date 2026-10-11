@@ -6,7 +6,6 @@ import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import {
   calculateTokenUsage,
-  estimateMessageTokens,
   getModelContextWindow,
   formatTokenNumber,
 } from '../src/client/token-counter.js';
@@ -53,8 +52,14 @@ describe('DeepSeek Harness (DSH) Token Counter', () => {
 
   it('estimates message tokens and calculates usage percentages and warning statuses', () => {
     const messages = [
-      { role: 'user', content: 'Hello, please help me plan a system architecture.' },
-      { role: 'assistant', content: 'Here is a phased breakdown of the architecture components...' },
+      {
+        role: 'user',
+        content: 'Hello, please help me plan a system architecture.',
+      },
+      {
+        role: 'assistant',
+        content: 'Here is a phased breakdown of the architecture components...',
+      },
     ];
     const usage = calculateTokenUsage(messages, 'deepseek-chat');
     expect(usage.estimatedTokens).toBeGreaterThan(0);
@@ -63,9 +68,7 @@ describe('DeepSeek Harness (DSH) Token Counter', () => {
     expect(usage.status).toBe('normal');
 
     // Simulate high usage
-    const hugeMessages = [
-      { role: 'user', content: 'x'.repeat(400_000) },
-    ];
+    const hugeMessages = [{ role: 'user', content: 'x'.repeat(400_000) }];
     const highUsage = calculateTokenUsage(hugeMessages, 'deepseek-chat');
     expect(highUsage.percentage).toBeGreaterThan(70);
     expect(['warning', 'critical']).toContain(highUsage.status);
@@ -93,7 +96,11 @@ describe('DSH Categorized Memories', () => {
 
     store.saveMemory('Keep answers concise', undefined, 'preference');
     store.saveMemory('Parent company is SafarNow', undefined, 'fact');
-    store.saveMemory('Always use markdown checklists', undefined, 'instruction');
+    store.saveMemory(
+      'Always use markdown checklists',
+      undefined,
+      'instruction',
+    );
 
     const all = store.memories();
     expect(all).toHaveLength(3);

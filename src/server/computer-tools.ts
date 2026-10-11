@@ -2,7 +2,8 @@ import { defineTool } from '@copilotkit/runtime/v2';
 import { computerInputs } from '../shared/computer-types.js';
 import type { ComputerService } from './computer-service.js';
 
-const PRUNE_MARKER = '\n\n[... output middle pruned for context budget ...]\n\n';
+const PRUNE_MARKER =
+  '\n\n[... output middle pruned for context budget ...]\n\n';
 
 /**
  * Deterministic tool output pruner adopted from dsh (dsh-compaction-tool-result-pruner).
@@ -25,8 +26,15 @@ export function pruneToolOutput(
   }
   if (data !== null && typeof data === 'object') {
     const pruned: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-      pruned[key] = pruneToolOutput(value, thresholdChars, headChars, tailChars);
+    for (const [key, value] of Object.entries(
+      data as Record<string, unknown>,
+    )) {
+      pruned[key] = pruneToolOutput(
+        value,
+        thresholdChars,
+        headChars,
+        tailChars,
+      );
     }
     return pruned;
   }
@@ -76,7 +84,11 @@ export function computerTools(
               signal,
             );
             const pruned = pruneToolOutput(rawResult);
-            if (repeatWarning && typeof pruned === 'object' && pruned !== null) {
+            if (
+              repeatWarning &&
+              typeof pruned === 'object' &&
+              pruned !== null
+            ) {
               return { ...pruned, warning: repeatWarning };
             }
             return pruned;

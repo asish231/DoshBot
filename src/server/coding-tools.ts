@@ -1,6 +1,13 @@
 import { defineTool } from '@copilotkit/runtime/v2';
 import { z } from 'zod';
-import { existsSync, readFileSync, writeFileSync, statSync, readdirSync, mkdirSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  statSync,
+  readdirSync,
+  mkdirSync,
+} from 'node:fs';
 import { resolve, isAbsolute, relative, join, dirname } from 'node:path';
 import { exec } from 'node:child_process';
 import { pruneToolOutput } from './computer-tools.js';
@@ -24,10 +31,63 @@ const undoHistory: Map<string, string[]> = new Map();
 
 function getSafePath(workspaceRoot: string, targetPath: string): string {
   const cleanRoot = resolve(workspaceRoot);
-  const full = isAbsolute(targetPath) ? resolve(targetPath) : resolve(cleanRoot, targetPath);
-  // Ensure target doesn't escape workspace root unless explicitly in dev environment
+  const full = isAbsolute(targetPath)
+    ? resolve(targetPath)
+    : resolve(cleanRoot, targetPath);
+  const rel = relative(cleanRoot, full);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(
+      `Path escapes the connected workspace (${cleanRoot}): ${targetPath}. Use paths inside the connected folder.`,
+    );
+  }
   return full;
 }
+
+/** Bash commands that only read state; anything else (or with shell operators) counts as mutating. */
+const READ_ONLY_BASH = [
+  'ls',
+  'cat',
+  'head',
+  'tail',
+  'grep',
+  'rg',
+  'find',
+  'wc',
+  'du',
+  'df',
+  'pwd',
+  'which',
+  'whoami',
+  'date',
+  'echo',
+  'env',
+  'printenv',
+  'file',
+  'stat',
+  'tree',
+  'git status',
+  'git diff',
+  'git log',
+  'git show',
+  'git branch',
+  'git remote',
+  'git rev-parse',
+  'git ls-files',
+];
+
+function isReadOnlyBashCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (/[;&|>><($`\\]/.test(trimmed)) return false;
+  return READ_ONLY_BASH.some((safe) => {
+    const prefix = `${safe} `;
+    return trimmed === safe || trimmed.startsWith(prefix);
+  });
+}
+
+const ASK_EDITS_MESSAGE =
+  "File edits are set to 'Ask Confirmation' in workspace coding permissions. Present the exact edit to the user with ask_question; they can approve by switching edits to 'Auto' in Settings, then retry.";
+const ASK_BASH_MESSAGE =
+  "Mutating shell commands are blocked because bash is set to 'Ask Confirmation' in workspace coding permissions. Present the exact command to the user with ask_question; they can approve by switching bash to 'Auto' in Settings, then retry.";
 
 function matchOffsets(content: string, search: string): number[] {
   const offsets: number[] = [];
@@ -83,10 +143,16 @@ function formatEditSnippet(
     }
     return Math.min(lines.length, line);
   })();
-  const end = Math.min(lines.length, Math.max(focusEndLine, focusLine) + contextLines);
+  const end = Math.min(
+    lines.length,
+    Math.max(focusEndLine, focusLine) + contextLines,
+  );
   const numbered = lines
     .slice(start - 1, end)
-    .map((line, idx) => `${start + idx === focusLine ? '>' : ' '}${String(start + idx).padStart(6, ' ')}  ${line}`)
+    .map(
+      (line, idx) =>
+        `${start + idx === focusLine ? '>' : ' '}${String(start + idx).padStart(6, ' ')}  ${line}`,
+    )
     .join('\n');
   return `Edited ${filePath} (lines ${start}-${end} of ${lines.length}, '>' marks the edit):\n${numbered}\n`;
 }
@@ -116,7 +182,9 @@ function formatFileView(
   }
 
   const numbered = lines
-    .map((line, idx) => `${String(initialLine + idx).padStart(6, ' ')}  ${line}`)
+    .map(
+      (line, idx) => `${String(initialLine + idx).padStart(6, ' ')}  ${line}`,
+    )
     .join('\n');
 
   const fullText = `${prompt}:\n${numbered}\n`;
@@ -153,7 +221,9 @@ function listDirectory(dirPath: string, maxDepth = 2): string {
           rows.push(`f\t${rel}`);
         }
       }
-    } catch {}
+    } catch {
+      /* unreadable or vanished entry; skip it */
+    }
   }
 
   walk(dirPath, 1);
@@ -186,18 +256,45 @@ Commands:
 - undo_edit: Restores the file to its state prior to the most recent edit.`,
     parameters: z.object({
       command: z.enum(['view', 'create', 'str_replace', 'insert', 'undo_edit']),
-      path: z.string().describe('File or directory path (relative to workspace or absolute)'),
-      file_text: z.string().optional().describe('Content to write when command is "create"'),
-      old_str: z.string().optional().describe('Exact unique string to replace when command is "str_replace"'),
-      new_str: z.string().optional().describe('Replacement string for "str_replace" or text to insert for "insert"'),
-      insert_line: z.number().int().optional().describe('Line number after which to insert (0 for start)'),
+      path: z
+        .string()
+        .describe('File or directory path (relative to workspace or absolute)'),
+      file_text: z
+        .string()
+        .optional()
+        .describe('Content to write when command is "create"'),
+      old_str: z
+        .string()
+        .optional()
+        .describe(
+          'Exact unique string to replace when command is "str_replace"',
+        ),
+      new_str: z
+        .string()
+        .optional()
+        .describe(
+          'Replacement string for "str_replace" or text to insert for "insert"',
+        ),
+      insert_line: z
+        .number()
+        .int()
+        .optional()
+        .describe('Line number after which to insert (0 for start)'),
       view_range: z
         .array(z.number().int())
         .max(2)
         .optional()
         .describe('Line range [start, end] when command is "view"'),
     }),
-    execute: async ({ command, path: rawPath, file_text, old_str, new_str, insert_line, view_range }) => {
+    execute: async ({
+      command,
+      path: rawPath,
+      file_text,
+      old_str,
+      new_str,
+      insert_line,
+      view_range,
+    }) => {
       check();
       const target = getSafePath(workspaceRoot, rawPath);
 
@@ -210,12 +307,21 @@ Commands:
           return listDirectory(target);
         }
         const content = readFileSync(target, 'utf-8');
-        return formatFileView(rawPath, content, view_range as [number, number] | undefined);
+        return formatFileView(
+          rawPath,
+          content,
+          view_range as [number, number] | undefined,
+        );
       }
 
       if (['create', 'str_replace', 'insert', 'undo_edit'].includes(command)) {
         if (ctx?.permissions?.edits === 'deny') {
-          throw new Error('File modifications are denied by workspace coding permissions.');
+          throw new Error(
+            'File modifications are denied by workspace coding permissions.',
+          );
+        }
+        if (ctx?.permissions?.edits === 'ask') {
+          throw new Error(ASK_EDITS_MESSAGE);
         }
       }
 
@@ -224,7 +330,9 @@ Commands:
           throw new Error('file_text is required for command "create"');
         }
         if (existsSync(target)) {
-          throw new Error(`File already exists at: ${rawPath}. Cannot overwrite using "create". Use "str_replace" instead.`);
+          throw new Error(
+            `File already exists at: ${rawPath}. Cannot overwrite using "create". Use "str_replace" instead.`,
+          );
         }
         mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, file_text, 'utf-8');
@@ -261,7 +369,9 @@ Commands:
         undoHistory.set(target, history);
 
         const updated =
-          currentContent.slice(0, offset) + replacement + currentContent.slice(offset + old_str.length);
+          currentContent.slice(0, offset) +
+          replacement +
+          currentContent.slice(offset + old_str.length);
         writeFileSync(target, updated, 'utf-8');
         return `The file ${rawPath} has been edited successfully.\n${formatEditSnippet(rawPath, updated, offset, replacement.length)}`;
       }
@@ -299,7 +409,9 @@ Commands:
         ];
         const updatedContent = updatedLines.join('\n');
         writeFileSync(target, updatedContent, 'utf-8');
-        const insertCharOffset = lines.slice(0, insert_line).join('\n').length + (insert_line > 0 ? 1 : 0);
+        const insertCharOffset =
+          lines.slice(0, insert_line).join('\n').length +
+          (insert_line > 0 ? 1 : 0);
         return `Inserted content successfully after line ${insert_line} in ${rawPath}.\n${formatEditSnippet(rawPath, updatedContent, insertCharOffset, new_str.length)}`;
       }
 
@@ -325,19 +437,48 @@ Use for building, running tests, inspecting git status, or running tools.
 Output is pruned if overly long to conserve context window.`,
     parameters: z.object({
       command: z.string().describe('The bash command line to execute.'),
-      description: z.string().describe('Clear, concise description of what this command does in active voice (5-10 words).'),
-      workdir: z.string().optional().describe('Subdirectory relative to workspace. Defaults to workspace root.'),
-      timeoutMs: z.number().int().optional().default(30000).describe('Timeout in milliseconds (default 30s, max 120s).'),
+      description: z
+        .string()
+        .describe(
+          'Clear, concise description of what this command does in active voice (5-10 words).',
+        ),
+      workdir: z
+        .string()
+        .optional()
+        .describe(
+          'Subdirectory relative to workspace. Defaults to workspace root.',
+        ),
+      timeoutMs: z
+        .number()
+        .int()
+        .optional()
+        .default(30000)
+        .describe('Timeout in milliseconds (default 30s, max 120s).'),
     }),
-    execute: async ({ command, description: _desc, workdir, timeoutMs = 30000 }) => {
+    execute: async ({
+      command,
+      description: _desc,
+      workdir,
+      timeoutMs = 30000,
+    }) => {
       check();
       if (ctx?.permissions?.bash === 'deny') {
-        throw new Error('Bash command execution is denied by workspace coding permissions.');
+        throw new Error(
+          'Bash command execution is denied by workspace coding permissions.',
+        );
+      }
+      if (ctx?.permissions?.bash === 'ask' && !isReadOnlyBashCommand(command)) {
+        throw new Error(ASK_BASH_MESSAGE);
       }
       const cwd = workdir ? getSafePath(workspaceRoot, workdir) : workspaceRoot;
       const effectiveTimeout = Math.min(Math.max(timeoutMs, 1000), 120000);
 
-      return new Promise<{ exitCode: number; stdout: string; stderr: string; durationMs: number }>((resolvePromise) => {
+      return new Promise<{
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+        durationMs: number;
+      }>((resolvePromise) => {
         const startTime = Date.now();
         const child = exec(
           command,
@@ -349,9 +490,24 @@ Output is pruned if overly long to conserve context window.`,
           },
           (error, stdout, stderr) => {
             const durationMs = Date.now() - startTime;
-            const exitCode = error && 'code' in error && typeof error.code === 'number' ? error.code : error ? 1 : 0;
-            const prunedStdout = pruneToolOutput(stdout, 12000, 6000, 2000) as string;
-            const prunedStderr = pruneToolOutput(stderr, 6000, 3000, 1000) as string;
+            const exitCode =
+              error && 'code' in error && typeof error.code === 'number'
+                ? error.code
+                : error
+                  ? 1
+                  : 0;
+            const prunedStdout = pruneToolOutput(
+              stdout,
+              12000,
+              6000,
+              2000,
+            ) as string;
+            const prunedStderr = pruneToolOutput(
+              stderr,
+              6000,
+              3000,
+              1000,
+            ) as string;
 
             resolvePromise({
               exitCode,
@@ -365,7 +521,9 @@ Output is pruned if overly long to conserve context window.`,
         signal.addEventListener('abort', () => {
           try {
             child.kill('SIGKILL');
-          } catch {}
+          } catch {
+            /* unreadable or vanished entry; skip it */
+          }
         });
       });
     },
@@ -373,15 +531,22 @@ Output is pruned if overly long to conserve context window.`,
 
   const searchTool = defineTool({
     name: 'search_files',
-    description: 'Search for files by name/glob pattern or search file contents for text in the workspace.',
+    description:
+      'Search for files by name/glob pattern or search file contents for text in the workspace.',
     parameters: z.object({
-      pattern: z.string().describe('Filename pattern or substring (e.g. "*.ts" or "component")'),
-      query: z.string().optional().describe('Optional text content to search for inside files'),
+      pattern: z
+        .string()
+        .describe('Filename pattern or substring (e.g. "*.ts" or "component")'),
+      query: z
+        .string()
+        .optional()
+        .describe('Optional text content to search for inside files'),
       maxResults: z.number().int().optional().default(30),
     }),
     execute: async ({ pattern, query, maxResults = 30 }) => {
       check();
-      const results: Array<{ file: string; line?: number; match?: string }> = [];
+      const results: Array<{ file: string; line?: number; match?: string }> =
+        [];
 
       function searchDir(current: string) {
         if (results.length >= maxResults) return;
@@ -403,7 +568,9 @@ Output is pruned if overly long to conserve context window.`,
             if (entry.isDirectory()) {
               searchDir(full);
             } else if (entry.isFile()) {
-              const nameMatches = pattern === '*' || rel.toLowerCase().includes(pattern.toLowerCase());
+              const nameMatches =
+                pattern === '*' ||
+                rel.toLowerCase().includes(pattern.toLowerCase());
               if (!query) {
                 if (nameMatches) {
                   results.push({ file: rel });
@@ -422,11 +589,15 @@ Output is pruned if overly long to conserve context window.`,
                       if (results.length >= maxResults) break;
                     }
                   }
-                } catch {}
+                } catch {
+                  /* unreadable or vanished entry; skip it */
+                }
               }
             }
           }
-        } catch {}
+        } catch {
+          /* unreadable or vanished entry; skip it */
+        }
       }
 
       searchDir(workspaceRoot);
@@ -436,25 +607,53 @@ Output is pruned if overly long to conserve context window.`,
 
   const sessionMemoryTool = defineTool({
     name: 'save_session_memory',
-    description: 'Save a note, task state, or context item specifically for the current chat session. Does not pollute global workspace memory.',
+    description:
+      'Save a note, task state, or context item specifically for the current chat session. Does not pollute global workspace memory.',
     parameters: z.object({
-      text: z.string().min(1).max(2000).describe('Note or observation to remember for this conversation'),
-      category: z.enum(['note', 'goal', 'context', 'todo', 'general']).optional().default('note'),
+      text: z
+        .string()
+        .min(1)
+        .max(2000)
+        .describe('Note or observation to remember for this conversation'),
+      category: z
+        .enum(['note', 'goal', 'context', 'todo', 'general'])
+        .optional()
+        .default('note'),
     }),
     execute: async ({ text, category = 'note' }) => {
       check();
       if (!ctx) return { error: 'Memory context unavailable' };
-      const saved = ctx.workspace.saveSessionMemory(ctx.threadId, text, undefined, category);
+      const saved = ctx.workspace.saveSessionMemory(
+        ctx.threadId,
+        text,
+        undefined,
+        category,
+      );
       return { success: true, saved };
     },
   });
 
   const globalMemoryTool = defineTool({
     name: 'save_global_memory',
-    description: 'Save a persistent preference, fact, or instruction across all sessions in this workspace.',
+    description:
+      'Save a persistent preference, fact, or instruction across all sessions in this workspace.',
     parameters: z.object({
-      text: z.string().min(1).max(2000).describe('Workspace-wide fact, user preference, or permanent rule'),
-      category: z.enum(['preference', 'fact', 'instruction', 'project', 'goal', 'general']).optional().default('general'),
+      text: z
+        .string()
+        .min(1)
+        .max(2000)
+        .describe('Workspace-wide fact, user preference, or permanent rule'),
+      category: z
+        .enum([
+          'preference',
+          'fact',
+          'instruction',
+          'project',
+          'goal',
+          'general',
+        ])
+        .optional()
+        .default('general'),
     }),
     execute: async ({ text, category = 'general' }) => {
       check();
@@ -471,33 +670,83 @@ Output is pruned if overly long to conserve context window.`,
     name: 'code_interpreter',
     description: `Run a code snippet directly (Open Interpreter parity). Supports python3 and node/javascript. Use for calculations, data analysis, file transforms, quick verification scripts. Runs in the connected local workspace directory with a 30s default timeout.`,
     parameters: z.object({
-      language: z.enum(['python', 'javascript', 'typescript']).describe('Runtime to execute the code with.'),
-      code: z.string().min(1).max(20000).describe('Full source code to execute.'),
-      description: z.string().describe('Clear, concise description of what this code does (5-10 words).'),
-      timeoutMs: z.number().int().optional().default(30000).describe('Timeout in ms (default 30s, max 120s).'),
+      language: z
+        .enum(['python', 'javascript', 'typescript'])
+        .describe('Runtime to execute the code with.'),
+      code: z
+        .string()
+        .min(1)
+        .max(20000)
+        .describe('Full source code to execute.'),
+      description: z
+        .string()
+        .describe(
+          'Clear, concise description of what this code does (5-10 words).',
+        ),
+      timeoutMs: z
+        .number()
+        .int()
+        .optional()
+        .default(30000)
+        .describe('Timeout in ms (default 30s, max 120s).'),
     }),
-    execute: async ({ language, code, description: _desc, timeoutMs = 30000 }) => {
+    execute: async ({
+      language,
+      code,
+      description: _desc,
+      timeoutMs = 30000,
+    }) => {
       check();
       if (ctx?.permissions?.bash === 'deny') {
-        throw new Error('Code execution is denied by workspace coding permissions.');
+        throw new Error(
+          'Code execution is denied by workspace coding permissions.',
+        );
+      }
+      if (ctx?.permissions?.bash === 'ask') {
+        throw new Error(ASK_BASH_MESSAGE);
       }
       const { writeFileSync, unlinkSync } = await import('node:fs');
       const { tmpdir } = await import('node:os');
       const { join } = await import('node:path');
       const { randomUUID } = await import('node:crypto');
-      const ext = language === 'python' ? 'py' : language === 'javascript' ? 'mjs' : 'ts';
+      const ext =
+        language === 'python' ? 'py' : language === 'javascript' ? 'mjs' : 'ts';
       const tmpFile = join(tmpdir(), `doshbot-interp-${randomUUID()}.${ext}`);
       writeFileSync(tmpFile, code, 'utf-8');
-      const runner = language === 'python' ? `python3 "${tmpFile}"` : language === 'javascript' ? `node "${tmpFile}"` : `npx -y tsx "${tmpFile}"`;
+      const runner =
+        language === 'python'
+          ? `python3 "${tmpFile}"`
+          : language === 'javascript'
+            ? `node "${tmpFile}"`
+            : `npx -y tsx "${tmpFile}"`;
       const effectiveTimeout = Math.min(Math.max(timeoutMs, 1000), 120000);
-      return new Promise<{ exitCode: number; stdout: string; stderr: string; language: string }>((resolvePromise) => {
+      return new Promise<{
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+        language: string;
+      }>((resolvePromise) => {
         const start = Date.now();
         const child = exec(
           runner,
-          { cwd: workspaceRoot, timeout: effectiveTimeout, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, PAGER: 'cat', CI: 'true' } },
+          {
+            cwd: workspaceRoot,
+            timeout: effectiveTimeout,
+            maxBuffer: 4 * 1024 * 1024,
+            env: { ...process.env, PAGER: 'cat', CI: 'true' },
+          },
           (error, stdout, stderr) => {
-            try { unlinkSync(tmpFile); } catch {}
-            const exitCode = error && 'code' in error && typeof error.code === 'number' ? error.code : error ? 1 : 0;
+            try {
+              unlinkSync(tmpFile);
+            } catch {
+              /* temp file already removed */
+            }
+            const exitCode =
+              error && 'code' in error && typeof error.code === 'number'
+                ? error.code
+                : error
+                  ? 1
+                  : 0;
             resolvePromise({
               exitCode,
               stdout: String(pruneToolOutput(stdout, 12000, 6000, 2000)),
@@ -508,11 +757,22 @@ Output is pruned if overly long to conserve context window.`,
           },
         );
         signal.addEventListener('abort', () => {
-          try { child.kill('SIGKILL'); } catch {}
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            /* process already exited */
+          }
         });
       });
     },
   });
 
-  return [editorTool, bashTool, searchTool, interpreterTool, sessionMemoryTool, globalMemoryTool];
+  return [
+    editorTool,
+    bashTool,
+    searchTool,
+    interpreterTool,
+    sessionMemoryTool,
+    globalMemoryTool,
+  ];
 }

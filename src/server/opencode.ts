@@ -1,5 +1,5 @@
 import { exec, execFile, spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -63,7 +63,9 @@ export async function findOpenCodeBinary(): Promise<string | null> {
 /**
  * Inspects and returns OpenCode integration status, free models, and variants.
  */
-export async function getOpenCodeStatus(forceRefresh = false): Promise<OpenCodeStatus> {
+export async function getOpenCodeStatus(
+  forceRefresh = false,
+): Promise<OpenCodeStatus> {
   const now = Date.now();
   if (!forceRefresh && cachedStatus && now - lastCheckTime < CACHE_TTL_MS) {
     return cachedStatus;
@@ -82,7 +84,7 @@ export async function getOpenCodeStatus(forceRefresh = false): Promise<OpenCodeS
     return cachedStatus;
   }
 
-  let version = '';
+  let version: string;
   try {
     const { stdout } = await execFileAsync(binaryPath, ['--version']);
     version = stdout.trim();
@@ -111,10 +113,14 @@ export async function getOpenCodeStatus(forceRefresh = false): Promise<OpenCodeS
   ];
 
   try {
-    const { stdout } = await execFileAsync(binaryPath, ['models', '--verbose'], {
-      timeout: 10000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+    const { stdout } = await execFileAsync(
+      binaryPath,
+      ['models', '--verbose'],
+      {
+        timeout: 10000,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
 
     // Parse models list
     const lines = stdout.split('\n');
@@ -155,7 +161,10 @@ export async function getOpenCodeStatus(forceRefresh = false): Promise<OpenCodeS
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
-      if (line.startsWith('opencode/') || (line.startsWith('{') && !currentId)) {
+      if (
+        line.startsWith('opencode/') ||
+        (line.startsWith('{') && !currentId)
+      ) {
         if (currentId && jsonBuffer.trim()) {
           processEntry(currentId, jsonBuffer);
         }
@@ -171,10 +180,18 @@ export async function getOpenCodeStatus(forceRefresh = false): Promise<OpenCodeS
   } catch {
     // If verbose parsing fails, use standard `opencode models`
     try {
-      const { stdout } = await execFileAsync(binaryPath, ['models'], { timeout: 8000 });
-      const modelLines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+      const { stdout } = await execFileAsync(binaryPath, ['models'], {
+        timeout: 8000,
+      });
+      const modelLines = stdout
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
       for (const m of modelLines) {
-        const isFree = m.endsWith('-free') || m.includes('free') || m === 'opencode/big-pickle';
+        const isFree =
+          m.endsWith('-free') ||
+          m.includes('free') ||
+          m === 'opencode/big-pickle';
         const item: OpenCodeModelMeta = {
           id: m,
           name: m.replace(/^opencode\//, ''),
@@ -250,7 +267,9 @@ export interface OpenCodeRunResult {
 /**
  * Executes a prompt using OpenCode CLI in headless JSON mode.
  */
-export async function runOpenCode(options: OpenCodeRunOptions): Promise<OpenCodeRunResult> {
+export async function runOpenCode(
+  options: OpenCodeRunOptions,
+): Promise<OpenCodeRunResult> {
   const binaryPath = await findOpenCodeBinary();
   if (!binaryPath) {
     throw new Error('OpenCode binary is not installed on this system.');
@@ -271,10 +290,12 @@ export async function runOpenCode(options: OpenCodeRunOptions): Promise<OpenCode
   }
 
   try {
-  // NOTE: stdin must be ignored, not piped. `opencode run` reads piped stdin
-  // as extra message input, so a default-piped stdin hangs forever.
-  const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>(
-    (resolvePromise, rejectPromise) => {
+    // NOTE: stdin must be ignored, not piped. `opencode run` reads piped stdin
+    // as extra message input, so a default-piped stdin hangs forever.
+    const { stdout, stderr } = await new Promise<{
+      stdout: string;
+      stderr: string;
+    }>((resolvePromise, rejectPromise) => {
       const child = spawn(binaryPath, args, {
         cwd: options.workdir || process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -284,8 +305,14 @@ export async function runOpenCode(options: OpenCodeRunOptions): Promise<OpenCode
       const timer = setTimeout(() => {
         try {
           child.kill('SIGKILL');
-        } catch {}
-        rejectPromise(new Error(`OpenCode run timed out after ${options.timeoutMs || 60_000}ms.`));
+        } catch {
+          /* child already exited */
+        }
+        rejectPromise(
+          new Error(
+            `OpenCode run timed out after ${options.timeoutMs || 60_000}ms.`,
+          ),
+        );
       }, options.timeoutMs || 60_000);
       child.stdout.on('data', (chunk) => {
         stdout += String(chunk);
@@ -306,13 +333,16 @@ export async function runOpenCode(options: OpenCodeRunOptions): Promise<OpenCode
       child.on('close', (code) => {
         clearTimeout(timer);
         if (code !== 0 && !stdout.trim()) {
-          rejectPromise(new Error(`OpenCode exited with code ${code}: ${stderr.trim().slice(0, 500)}`));
+          rejectPromise(
+            new Error(
+              `OpenCode exited with code ${code}: ${stderr.trim().slice(0, 500)}`,
+            ),
+          );
           return;
         }
         resolvePromise({ stdout, stderr });
       });
-    },
-  );
+    });
 
     let fullText = '';
     let tokens: { total: number; input: number; output: number } | undefined;
@@ -343,10 +373,10 @@ export async function runOpenCode(options: OpenCodeRunOptions): Promise<OpenCode
       tokens,
       cost,
     };
-  } catch (err: any) {
+  } catch (err) {
     return {
       text: '',
-      error: err.message || String(err),
+      error: err instanceof Error ? err.message : String(err),
     };
   }
 }

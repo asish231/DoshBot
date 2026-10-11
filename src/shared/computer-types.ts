@@ -5,7 +5,6 @@ export const computerPermissionsSchema = z
     browser: z.boolean(),
     files: z.boolean(),
     shell: z.boolean(),
-    environment: z.string().optional(),
   })
   .strict();
 export type ComputerPermissions = z.infer<typeof computerPermissionsSchema>;

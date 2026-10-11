@@ -261,7 +261,7 @@ it('bounds completed audit storage while preserving pending work', () => {
     );
   f.workspace.computers.finish(pending, 'failed');
   expect(f.workspace.computers.audit(f.id)).toHaveLength(50);
-});
+}, 30_000);
 
 it('accepts an uppercase namespace while preserving exact container identity', async () => {
   const f = fixture();

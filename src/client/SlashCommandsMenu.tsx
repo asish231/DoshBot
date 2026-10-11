@@ -15,7 +15,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: 'goal',
     command: '/goal',
     name: 'Goal Mode',
-    description: 'Long-horizon autonomous execution with deep thinking until completion',
+    description:
+      'Long-horizon autonomous execution with deep thinking until completion',
     placeholder: '/goal Build and verify ',
     category: 'execution',
   },
@@ -39,7 +40,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: 'compact',
     command: '/compact',
     name: 'Compact Context',
-    description: 'Summarize past conversation turns to free token context window',
+    description:
+      'Summarize past conversation turns to free token context window',
     category: 'context',
     immediate: true,
   },
@@ -47,7 +49,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: 'memory',
     command: '/memory',
     name: 'Remember Note',
-    description: 'Save note to session or global memory (/memory [session] or /memory [global])',
+    description:
+      'Save note to session or global memory (/memory [session] or /memory [global])',
     placeholder: '/memory [session] ',
     category: 'context',
   },
@@ -55,7 +58,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: 'subagents',
     command: '/subagents',
     name: 'Subagent Swarm',
-    description: 'Split the task across 2-5 parallel subagents and merge results',
+    description:
+      'Split the task across 2-5 parallel subagents and merge results',
     category: 'tools',
   },
   {
@@ -126,7 +130,9 @@ export function SlashCommandsMenu({
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Filter commands by input
-  const query = filter.startsWith('/') ? filter.slice(1).toLowerCase() : filter.toLowerCase();
+  const query = filter.startsWith('/')
+    ? filter.slice(1).toLowerCase()
+    : filter.toLowerCase();
   const filtered = commands.filter(
     (cmd) =>
       cmd.command.toLowerCase().includes(query) ||
@@ -148,14 +154,20 @@ export function SlashCommandsMenu({
   if (filtered.length === 0) return null;
 
   return (
-    <div className="slash-commands-menu" ref={menuRef} role="listbox" aria-label="Slash commands">
+    <div
+      className="slash-commands-menu"
+      ref={menuRef}
+      role="listbox"
+      aria-label="Slash commands"
+    >
       <div className="slash-menu-header">
         <span className="slash-menu-title">Commands</span>
         <span className="slash-menu-badge">DoshBot by SafarNow</span>
       </div>
       <div className="slash-menu-list">
         {filtered.map((item, index) => {
-          const isSelected = index === Math.min(selectedIndex, filtered.length - 1);
+          const isSelected =
+            index === Math.min(selectedIndex, filtered.length - 1);
           return (
             <div
               key={item.id}
@@ -180,7 +192,11 @@ export function SlashCommandsMenu({
         })}
       </div>
       <div className="slash-menu-footer">
-        <span>Use <kbd>↑</kbd><kbd>↓</kbd> to navigate, <kbd>Enter</kbd> or <kbd>Tab</kbd> to select, <kbd>Esc</kbd> to close</span>
+        <span>
+          Use <kbd>↑</kbd>
+          <kbd>↓</kbd> to navigate, <kbd>Enter</kbd> or <kbd>Tab</kbd> to
+          select, <kbd>Esc</kbd> to close
+        </span>
       </div>
     </div>
   );

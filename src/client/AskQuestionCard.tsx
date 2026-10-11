@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { askQuestionSchema, type AskQuestionArgs } from '../shared/ask-question';
+import { askQuestionSchema } from '../shared/ask-question';
 
 export interface AskQuestionCardProps {
   args: unknown;
@@ -41,10 +41,11 @@ export function AskQuestionCard({
     if (typeof result === 'string') {
       recordedAnswer = result;
     } else if (typeof result === 'object' && result !== null) {
+      const record = result as Record<string, unknown>;
       recordedAnswer =
-        (result as any).answer ||
-        (Array.isArray((result as any).selected)
-          ? (result as any).selected.join(', ')
+        (typeof record.answer === 'string' && record.answer) ||
+        (Array.isArray(record.selected)
+          ? record.selected.join(', ')
           : JSON.stringify(result));
     }
   }
@@ -91,7 +92,11 @@ export function AskQuestionCard({
   };
 
   return (
-    <div className="ask-question-card" role="region" aria-label="Question from agent">
+    <div
+      className="ask-question-card"
+      role="region"
+      aria-label="Question from agent"
+    >
       <div className="ask-question-header">
         <span className="ask-question-label">Question</span>
         <span className="ask-question-badge">
@@ -111,7 +116,10 @@ export function AskQuestionCard({
           <div className="ask-question-completed">
             <span className="ask-question-completed-label">Your decision:</span>
             <div className="ask-question-completed-answer">
-              {recordedAnswer || selected.join(', ') || customInput || 'Answer submitted'}
+              {recordedAnswer ||
+                selected.join(', ') ||
+                customInput ||
+                'Answer submitted'}
             </div>
           </div>
         ) : (
@@ -129,9 +137,13 @@ export function AskQuestionCard({
                   >
                     <span className="ask-question-option-indicator">
                       {is_multi_select ? (
-                        <span className={`ask-question-box ${isChecked ? 'checked' : ''}`} />
+                        <span
+                          className={`ask-question-box ${isChecked ? 'checked' : ''}`}
+                        />
                       ) : (
-                        <span className={`ask-question-radio ${isChecked ? 'checked' : ''}`} />
+                        <span
+                          className={`ask-question-radio ${isChecked ? 'checked' : ''}`}
+                        />
                       )}
                     </span>
                     <span className="ask-question-option-text">{opt}</span>
@@ -162,7 +174,9 @@ export function AskQuestionCard({
                 type="button"
                 className="ask-question-submit"
                 onClick={() => void handleSubmit()}
-                disabled={busy || (selected.length === 0 && !customInput.trim())}
+                disabled={
+                  busy || (selected.length === 0 && !customInput.trim())
+                }
               >
                 {busy ? 'Submitting…' : 'Submit Answer'}
               </button>

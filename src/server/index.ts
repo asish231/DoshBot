@@ -1,6 +1,16 @@
 process.env.COPILOTKIT_TELEMETRY_DISABLED = 'true';
 process.env.DO_NOT_TRACK = '1';
 
+import { Agent as UndiciAgent, setGlobalDispatcher } from 'undici';
+
+// Long reasoning / research turns can idle the model stream for minutes
+// between body chunks.  Undici's default 300 s body timeout would sever
+// those mid-stream — zero disables it; explicit AbortSignal timeouts
+// from the runner, DotAgent, and tools still apply independently.
+setGlobalDispatcher(
+  new UndiciAgent({ bodyTimeout: 0, headersTimeout: 600_000 }),
+);
+
 import { webSearchProvider } from './parallel.js';
 import { createShutdown } from './shutdown.js';
 import { reportChannelFailure, safeFailure } from './slack-channel.js';
@@ -8,7 +18,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Store } from './store.js';
 import { Runner } from './runner.js';
-import { createApp } from './app.js';
+import { createApp, type App } from './app.js';
 import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { TelegramChannel } from './telegram-channel.js';
@@ -86,26 +96,19 @@ const runner = new Runner(
 const wsOrigin = new URL(
   config.intelligenceWsUrl ?? 'wss://realtime.intelligence.copilotkit.ai',
 ).origin;
-const app = createApp({
+const origin =
+  process.env.APP_ORIGIN ??
+  (process.env.NODE_ENV === 'development'
+    ? 'http://127.0.0.1:5173'
+    : undefined);
+const app: App = createApp({
   store,
   runner,
   config: researchConfig,
   ownerToken,
-  origin:
-    process.env.APP_ORIGIN ??
-    (process.env.NODE_ENV === 'development'
-      ? 'http://127.0.0.1:5173'
-      : undefined),
+  origin,
   platform,
-});
-app.use('*', async (c, next) => {
-  c.header('X-Content-Type-Options', 'nosniff');
-  c.header('Referrer-Policy', 'no-referrer');
-  c.header(
-    'Content-Security-Policy',
-    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${wsOrigin}; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
-  );
-  await next();
+  connectOrigins: [wsOrigin],
 });
 app.get('/api/*', (c) => c.json({ error: 'Not found.' }, 404));
 app.use('/*', serveStatic({ root: './dist/client' }));
@@ -130,13 +133,16 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
       ),
     );
 });
-attachGeminiLiveHandler(server, platform);
+attachGeminiLiveHandler(server, platform, { ownerToken, origin });
 const shutdown = createShutdown({
   stopRunner: () => {
     runner.stop();
     telegram.stop();
   },
   stopPlatform: () => platform.stop(),
+  stopVoice: () => {
+    app.voiceService?.abortAll();
+  },
   closeServer: () =>
     new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),

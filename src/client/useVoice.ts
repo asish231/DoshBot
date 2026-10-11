@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, authHeaders } from './api';
+import { api, authHeaders, getToken } from './api';
 
 function resampleTo16k(
   audioData: Float32Array,
@@ -129,12 +129,16 @@ export function useVoice(
       for (const src of current.activeSources) {
         try {
           src.stop();
-        } catch {}
+        } catch {
+          /* already stopped or closed; safe to ignore */
+        }
       }
       current.activeSources = [];
       try {
         current.processor?.disconnect();
-      } catch {}
+      } catch {
+        /* already stopped or closed; safe to ignore */
+      }
       void current.audioContext.close().catch(() => {});
       if (
         current.ws.readyState === WebSocket.OPEN ||
@@ -165,13 +169,17 @@ export function useVoice(
       for (const src of current.activeSources) {
         try {
           src.stop();
-        } catch {}
+        } catch {
+          /* already stopped or closed; safe to ignore */
+        }
       }
       current.activeSources = [];
       if (current.ws.readyState === WebSocket.OPEN) {
         try {
           current.ws.send(JSON.stringify({ type: 'hangup' }));
-        } catch {}
+        } catch {
+          /* already stopped or closed; safe to ignore */
+        }
       }
     }
     clearTimeout(current.timer);
@@ -259,6 +267,12 @@ export function useVoice(
       }>('/state').catch(() => null);
       const provider = state?.settings?.voiceProvider || 'openai';
 
+      if (provider === 'browser') {
+        throw new Error(
+          'Browser voice was retired. Pick Gemini Live or OpenAI Realtime in Settings, then try again.',
+        );
+      }
+
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -288,7 +302,11 @@ export function useVoice(
         speakerGain.connect(audioContext.destination);
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/api/voice/gemini-live?threadId=${encodeURIComponent(threadId)}`;
+        const wsToken = getToken();
+        const tokenParam = wsToken
+          ? `&token=${encodeURIComponent(wsToken)}`
+          : '';
+        const wsUrl = `${protocol}//${window.location.host}/api/voice/gemini-live?threadId=${encodeURIComponent(threadId)}${tokenParam}`;
         const ws = new WebSocket(wsUrl);
 
         const activeSources: AudioBufferSourceNode[] = [];
@@ -403,7 +421,9 @@ export function useVoice(
             for (const src of activeSources) {
               try {
                 src.stop();
-              } catch {}
+              } catch {
+                /* already stopped or closed; safe to ignore */
+              }
             }
             activeSources.length = 0;
             nextPlayTime = audioContext.currentTime;

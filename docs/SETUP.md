@@ -109,6 +109,18 @@ From an allowed user, mention the bot and verify a response in the same Slack th
 
 Local tests exercise channel behavior with fixtures. A live Slack mention/reply remains unverified until you provision the managed connection and model credentials. [Channels SDK documentation](https://github.com/CopilotKit/channels-sdk) describes extending the adapter and channel behavior.
 
+## Telegram
+
+DoshBot can answer in Telegram through a bot you create yourself. The bot talks to the same conversations as the web app.
+
+1. Message [@BotFather](https://t.me/botfather) on Telegram, send `/newbot`, pick a name, and copy the API token.
+2. Add the token in **Settings -> Voice -> Telegram Bot Setup** (stored in the database), or set `TELEGRAM_BOT_TOKEN` in `.env`.
+3. Optional but strongly recommended: restrict who can use the bot with `TELEGRAM_ALLOWED_USERS` (comma-separated numeric user IDs; message [@userinfobot](https://t.me/userinfobot) to find yours). Without a whitelist, anyone who finds the bot can talk to your Dot.
+
+The bot long-polls Telegram from the server process — no webhook or public URL is required. Unlisted users receive a refusal message. Voice messages arrive as a placeholder note (audio transcription is not wired), and the bot uses the workspace's first Dot.
+
+Verify: from an allowed account, send a message and confirm a reply; from a disallowed account, confirm the refusal; pause the workspace in Settings and confirm the bot reports the pause.
+
 ## Calls
 
 The included speech adapter uses the Realtime API at `api.openai.com`. Set `VOICE_API_KEY` to a key with access to that API and `VOICE_MODEL` to a supported Realtime model (the local UI test used `gpt-realtime-2.1`); `VOICE_NAME` selects the voice. `OPENAI_BASE_URL` changes the compute model endpoint only, not speech. Calls use browser microphone access and WebRTC. Hosted deployments need HTTPS. The server mediates provider setup and delegates compute to the selected Dot's conversation.

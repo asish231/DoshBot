@@ -13,7 +13,6 @@ import {
   FolderOpen,
   FolderGit2,
   Menu,
-  MessageCircle,
   Monitor,
   MoreHorizontal,
   Pause,
@@ -56,9 +55,17 @@ function formatEffortName(effort: string): string {
 
 const EFFORT_LEVELS = [
   { id: 'low', label: 'Low', desc: 'Fast answers, minimal thinking tokens' },
-  { id: 'default', label: 'Medium', desc: 'Balanced analytical reasoning (default)' },
+  {
+    id: 'default',
+    label: 'Medium',
+    desc: 'Balanced analytical reasoning (default)',
+  },
   { id: 'high', label: 'High', desc: 'Deep thorough step-by-step thinking' },
-  { id: 'xhigh', label: 'Extra High', desc: 'Intensive reasoning for tough problems' },
+  {
+    id: 'xhigh',
+    label: 'Extra High',
+    desc: 'Intensive reasoning for tough problems',
+  },
   { id: 'max', label: 'Max', desc: 'Maximum possible thinking budget' },
 ];
 
@@ -74,14 +81,22 @@ import type {
   WorkspaceState,
 } from '../shared/types';
 import { api, ApiError, authHeaders, setToken } from './api';
-import { SlashCommandsMenu, SLASH_COMMANDS, type SlashCommand } from './SlashCommandsMenu';
+import {
+  SlashCommandsMenu,
+  SLASH_COMMANDS,
+  type SlashCommand,
+} from './SlashCommandsMenu';
 import { Mascot } from './Mascot';
 import { Chat } from './Chat';
 import { ThreadList } from './ThreadList';
 import { ResultPane } from './ResultPane';
 import { TaskRow } from './TaskPresentation';
 import { TaskActions } from './TaskActions';
-import { WorkspaceDialog, type Dialog } from './WorkspaceDialog';
+import {
+  WorkspaceDialog,
+  type Dialog,
+  type SettingsTab,
+} from './WorkspaceDialog';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 export function App() {
@@ -104,8 +119,10 @@ export function App() {
     if (dirtyPage.current && !window.confirm('Leave your unsaved page draft?'))
       return;
     dirtyPage.current = false;
-    if (next !== 'space')
-      history.replaceState(null, '', location.pathname + location.search);
+    // Deep links: every view has a hash address (#/chat, #/tasks, #/memories).
+    // Spaces keep their richer #/spaces/:id/pages/:id routes set by openPage.
+    const target = `#/${next}`;
+    if (location.hash !== target) history.replaceState(null, '', target);
     rawSetView(next);
   };
   useEffect(() => {
@@ -114,21 +131,30 @@ export function App() {
       const match = location.hash.match(
         /^#\/spaces\/([^/]+)(?:\/pages\/([^/]+))?$/,
       );
-      if (!match) return;
-      if (dirtyPage.current && location.hash === acceptedHash) return;
-      if (
-        dirtyPage.current &&
-        !window.confirm('Leave your unsaved page draft?')
-      ) {
-        history.replaceState(null, '', acceptedHash || location.pathname);
+      if (match) {
+        if (dirtyPage.current && location.hash === acceptedHash) return;
+        if (
+          dirtyPage.current &&
+          !window.confirm('Leave your unsaved page draft?')
+        ) {
+          history.replaceState(null, '', acceptedHash || location.pathname);
+          return;
+        }
+        acceptedHash = location.hash;
+        dirtyPage.current = false;
+        setSpaceId(match[1]);
+        setPageId(match[2]);
+        rawSetView('space');
+        setMobile(false);
         return;
       }
-      acceptedHash = location.hash;
-      dirtyPage.current = false;
-      setSpaceId(match[1]);
-      setPageId(match[2]);
-      rawSetView('space');
-      setMobile(false);
+      const simple = location.hash.match(/^#\/(chat|tasks|memories)$/);
+      if (simple) {
+        acceptedHash = location.hash;
+        dirtyPage.current = false;
+        rawSetView(simple[1] as 'chat' | 'tasks' | 'memories');
+        setMobile(false);
+      }
     };
     navigate();
     window.addEventListener('hashchange', navigate);
@@ -155,7 +181,16 @@ export function App() {
   const [homeSlashOpen, setHomeSlashOpen] = useState(false);
   const [homeSlashIndex, setHomeSlashIndex] = useState(0);
   const homeSlashCommands = SLASH_COMMANDS.filter((c) =>
-    ['goal', 'code', 'plan', 'subagents', 'memory', 'schedule', 'search', 'browse'].includes(c.id),
+    [
+      'goal',
+      'code',
+      'plan',
+      'subagents',
+      'memory',
+      'schedule',
+      'search',
+      'browse',
+    ].includes(c.id),
   );
   const handleHeroPromptChange = (text: string) => {
     setPrompt(text);
@@ -191,14 +226,15 @@ export function App() {
   ]);
 
   useEffect(() => {
-    fetch('/api/models')
-      .then((res) => res.json())
+    void api<{ models?: string[] }>('/models')
       .then((data) => {
         if (data && Array.isArray(data.models) && data.models.length > 0) {
           setModelOptions(data.models);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        /* model list unavailable; fallback list stays in place */
+      });
   }, []);
 
   useEffect(() => {
@@ -309,6 +345,11 @@ export function App() {
         dotId: dot.id,
         title: text?.slice(0, 80) || 'A new thought',
       });
+      if (
+        text === undefined &&
+        sessionStorage.getItem('opendots-autocall') === 'pending'
+      )
+        sessionStorage.setItem('opendots-autocall', next.id);
       await refresh();
       setSelectedThread(next.id);
       setPendingPrompt(text);
@@ -340,7 +381,9 @@ export function App() {
         reasoningEffort: dot.reasoningEffort || 'default',
       });
       await refresh();
-    } catch {}
+    } catch {
+      /* hero model pick is best-effort; the chat pill reports failures */
+    }
   };
 
   const updateDotEffort = async (newEffort: string) => {
@@ -359,7 +402,9 @@ export function App() {
         reasoningEffort: newEffort,
       });
       await refresh();
-    } catch {}
+    } catch {
+      /* hero effort pick is best-effort; the chat pill reports failures */
+    }
   };
 
   const deleteConversation = async (id: string) => {
@@ -370,7 +415,9 @@ export function App() {
       }
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not delete conversation.');
+      setError(
+        e instanceof Error ? e.message : 'Could not delete conversation.',
+      );
     }
   };
 
@@ -379,7 +426,9 @@ export function App() {
       await api(`/conversations/${id}`, 'PATCH', { title });
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not rename conversation.');
+      setError(
+        e instanceof Error ? e.message : 'Could not rename conversation.',
+      );
     }
   };
 
@@ -389,7 +438,9 @@ export function App() {
       setSelectedThread(undefined);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not clear conversations.');
+      setError(
+        e instanceof Error ? e.message : 'Could not clear conversations.',
+      );
     }
   };
 
@@ -784,9 +835,14 @@ export function App() {
                   onSchedule={() =>
                     setDialog({ type: 'schedule', threadId: thread.id })
                   }
-                  onDeleteConversation={() => void deleteConversation(thread.id)}
+                  onDeleteConversation={() =>
+                    void deleteConversation(thread.id)
+                  }
                   onOpenSettings={(tab) =>
-                    setDialog({ type: 'settings', initialTab: tab })
+                    setDialog({
+                      type: 'settings',
+                      initialTab: tab as SettingsTab | undefined,
+                    })
                   }
                 />
               ) : (
@@ -805,7 +861,11 @@ export function App() {
                     <div className="hero-actions">
                       <button
                         className="hero-btn primary-hero"
-                        onClick={() => setPrompt('/code Audit this workspace and propose a safe first edit ')}
+                        onClick={() =>
+                          setPrompt(
+                            '/code Audit this workspace and propose a safe first edit ',
+                          )
+                        }
                         disabled={!configured}
                       >
                         <Code2 size={15} />
@@ -830,15 +890,23 @@ export function App() {
                     </div>
                     <button
                       className="folder-connect-card"
-                      onClick={() => setDialog({ type: 'settings', initialTab: 'coding' })}
+                      onClick={() =>
+                        setDialog({ type: 'settings', initialTab: 'coding' })
+                      }
                       title="Connect a local directory like Claude / DeepSeek Harness — code, run bash, edit files natively"
                     >
                       <span className="folder-icon">
                         <FolderGit2 size={18} />
                       </span>
                       <span className="folder-text">
-                        <strong>{state.settings.codingDirectory || 'Connect a local folder to code in'}</strong>
-                        <small>Claude-style directory · str_replace_editor + bash + OpenCode engine</small>
+                        <strong>
+                          {state.settings.codingDirectory ||
+                            'Connect a local folder to code in'}
+                        </strong>
+                        <small>
+                          Claude-style directory · str_replace_editor + bash +
+                          OpenCode engine
+                        </small>
                       </span>
                       <span className="folder-cta">
                         <FolderOpen size={14} />
@@ -890,23 +958,37 @@ export function App() {
                         if (homeSlashOpen) {
                           const filtered = homeSlashCommands.filter(
                             (cmd) =>
-                              cmd.command.toLowerCase().includes(prompt.slice(1).toLowerCase()) ||
-                              cmd.name.toLowerCase().includes(prompt.slice(1).toLowerCase()),
+                              cmd.command
+                                .toLowerCase()
+                                .includes(prompt.slice(1).toLowerCase()) ||
+                              cmd.name
+                                .toLowerCase()
+                                .includes(prompt.slice(1).toLowerCase()),
                           );
                           if (filtered.length > 0) {
                             if (e.key === 'ArrowDown') {
                               e.preventDefault();
-                              setHomeSlashIndex((prev) => (prev + 1) % filtered.length);
+                              setHomeSlashIndex(
+                                (prev) => (prev + 1) % filtered.length,
+                              );
                               return;
                             }
                             if (e.key === 'ArrowUp') {
                               e.preventDefault();
-                              setHomeSlashIndex((prev) => (prev - 1 + filtered.length) % filtered.length);
+                              setHomeSlashIndex(
+                                (prev) =>
+                                  (prev - 1 + filtered.length) %
+                                  filtered.length,
+                              );
                               return;
                             }
                             if (e.key === 'Enter' || e.key === 'Tab') {
                               e.preventDefault();
-                              handleHeroSlashSelect(filtered[Math.min(homeSlashIndex, filtered.length - 1)]);
+                              handleHeroSlashSelect(
+                                filtered[
+                                  Math.min(homeSlashIndex, filtered.length - 1)
+                                ],
+                              );
                               return;
                             }
                           }
@@ -956,7 +1038,10 @@ export function App() {
 
                       <div className="chat-composer-right">
                         {/* Model Dropdown */}
-                        <div className="chat-popover-container" ref={homeModelPopoverRef}>
+                        <div
+                          className="chat-popover-container"
+                          ref={homeModelPopoverRef}
+                        >
                           <button
                             type="button"
                             className={`composer-pill-btn ${homeModelOpen ? 'open' : ''}`}
@@ -968,7 +1053,9 @@ export function App() {
                             title="Select Model"
                             aria-label="Select Model"
                           >
-                            <span>{formatModelName(dot.model || 'auto-code')}</span>
+                            <span>
+                              {formatModelName(dot.model || 'auto-code')}
+                            </span>
                             <ChevronDown
                               size={14}
                               className={`pill-chevron ${homeModelOpen ? 'rotated' : ''}`}
@@ -986,7 +1073,9 @@ export function App() {
                                   type="text"
                                   placeholder="Search models..."
                                   value={homeModelSearch}
-                                  onChange={(e) => setHomeModelSearch(e.target.value)}
+                                  onChange={(e) =>
+                                    setHomeModelSearch(e.target.value)
+                                  }
                                   autoFocus
                                 />
                               </div>
@@ -997,7 +1086,9 @@ export function App() {
                                       !homeModelSearch.trim() ||
                                       m
                                         .toLowerCase()
-                                        .includes(homeModelSearch.trim().toLowerCase()),
+                                        .includes(
+                                          homeModelSearch.trim().toLowerCase(),
+                                        ),
                                   )
                                   .map((m) => (
                                     <button
@@ -1010,10 +1101,14 @@ export function App() {
                                         setHomeModelSearch('');
                                       }}
                                     >
-                                      <span className="chat-item-name">{formatModelName(m)}</span>
+                                      <span className="chat-item-name">
+                                        {formatModelName(m)}
+                                      </span>
                                       <span className="chat-item-id">{m}</span>
                                       {dot.model === m && (
-                                        <span className="chat-item-check">✓</span>
+                                        <span className="chat-item-check">
+                                          ✓
+                                        </span>
                                       )}
                                     </button>
                                   ))}
@@ -1023,7 +1118,10 @@ export function App() {
                         </div>
 
                         {/* Effort Dropdown */}
-                        <div className="chat-popover-container" ref={homeEffortPopoverRef}>
+                        <div
+                          className="chat-popover-container"
+                          ref={homeEffortPopoverRef}
+                        >
                           <button
                             type="button"
                             className={`composer-pill-btn ${homeEffortOpen ? 'open' : ''}`}
@@ -1036,7 +1134,11 @@ export function App() {
                             aria-label="Reasoning Effort"
                           >
                             <BarChart2 size={15} strokeWidth={2.2} />
-                            <span>{formatEffortName(dot.reasoningEffort || 'default')}</span>
+                            <span>
+                              {formatEffortName(
+                                dot.reasoningEffort || 'default',
+                              )}
+                            </span>
                             <ChevronDown
                               size={14}
                               className={`pill-chevron ${homeEffortOpen ? 'rotated' : ''}`}
@@ -1060,10 +1162,15 @@ export function App() {
                                     }}
                                   >
                                     <div className="chat-effort-col">
-                                      <span className="chat-item-name">{eff.label}</span>
-                                      <span className="chat-item-desc">{eff.desc}</span>
+                                      <span className="chat-item-name">
+                                        {eff.label}
+                                      </span>
+                                      <span className="chat-item-desc">
+                                        {eff.desc}
+                                      </span>
                                     </div>
-                                    {(dot.reasoningEffort || 'default') === eff.id && (
+                                    {(dot.reasoningEffort || 'default') ===
+                                      eff.id && (
                                       <span className="chat-item-check">✓</span>
                                     )}
                                   </button>
@@ -1093,7 +1200,10 @@ export function App() {
                         </button>
 
                         {/* Audio / Voice Call & STT Selector */}
-                        <div className="chat-popover-container" ref={homeAudioPopoverRef}>
+                        <div
+                          className="chat-popover-container"
+                          ref={homeAudioPopoverRef}
+                        >
                           <button
                             type="button"
                             className={`composer-audio-btn ${homeAudioOpen ? 'open' : ''}`}
@@ -1131,11 +1241,17 @@ export function App() {
                                   }}
                                   onClick={() => {
                                     setHomeAudioOpen(false);
-                                    void newConversation(prompt || 'Hello Dot!');
+                                    sessionStorage.setItem(
+                                      'opendots-autocall',
+                                      'pending',
+                                    );
+                                    void newConversation();
                                   }}
                                 >
                                   <AudioLines size={16} />
-                                  <span style={{ color: '#fff', fontWeight: 600 }}>
+                                  <span
+                                    style={{ color: '#fff', fontWeight: 600 }}
+                                  >
                                     Start Live Voice Call
                                   </span>
                                 </button>
@@ -1268,9 +1384,19 @@ export function App() {
                 <div className="memory-grid">
                   {state.memories.map((memory) => (
                     <article className="memory-card" key={memory.id}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '4px' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          width: '100%',
+                          marginBottom: '4px',
+                        }}
+                      >
                         <BookOpen size={18} />
-                        <span className={`memory-category-badge category-${memory.category || 'general'}`}>
+                        <span
+                          className={`memory-category-badge category-${memory.category || 'general'}`}
+                        >
                           {memory.category || 'general'}
                         </span>
                       </div>
@@ -1442,8 +1568,10 @@ export function App() {
           try {
             await mutate(`/tasks/${taskToDelete.id}`, 'DELETE', {});
             setTaskDetail(undefined);
-          } catch (err: any) {
-            setError(err?.message || 'Could not delete task.');
+          } catch (err) {
+            setError(
+              err instanceof Error ? err.message : 'Could not delete task.',
+            );
           }
         }}
       />

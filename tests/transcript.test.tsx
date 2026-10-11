@@ -123,7 +123,9 @@ it('renders GFM markdown tables inside a responsive table container', () => {
 `;
   const html = renderToStaticMarkup(
     <ChatTranscript
-      messages={[{ id: 'table-msg', role: 'assistant', content: tableMarkdown }]}
+      messages={[
+        { id: 'table-msg', role: 'assistant', content: tableMarkdown },
+      ]}
       calls={[]}
     />,
   );

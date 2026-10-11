@@ -41,7 +41,7 @@ export class Store {
       !this.db
         .prepare('PRAGMA table_info(memories)')
         .all()
-        .some((col: any) => col.name === 'category')
+        .some((col: { name?: string }) => col.name === 'category')
     ) {
       this.db.exec('ALTER TABLE memories ADD COLUMN category TEXT');
     }
@@ -301,14 +301,20 @@ export class Store {
   memories(category?: string): Memory[] {
     if (category) {
       return this.db
-        .prepare('SELECT * FROM memories WHERE category=? ORDER BY createdAt DESC')
+        .prepare(
+          'SELECT * FROM memories WHERE category=? ORDER BY createdAt DESC',
+        )
         .all(category) as unknown as Memory[];
     }
     return this.db
       .prepare('SELECT * FROM memories ORDER BY createdAt DESC')
       .all() as unknown as Memory[];
   }
-  saveMemory(text: string, id: string = randomUUID(), category?: string): Memory {
+  saveMemory(
+    text: string,
+    id: string = randomUUID(),
+    category?: string,
+  ): Memory {
     this.db
       .prepare(
         'INSERT INTO memories (id, text, category, createdAt) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET text=excluded.text, category=COALESCE(excluded.category, memories.category)',

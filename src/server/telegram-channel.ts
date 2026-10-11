@@ -10,6 +10,7 @@ export class TelegramChannel {
   private abortController: AbortController | null = null;
   private running = false;
   private offset = 0;
+  /** chatId -> threadId cache over the durable workspace binding. */
   private threadMap = new Map<number, string>();
 
   constructor(
@@ -20,6 +21,22 @@ export class TelegramChannel {
     private config: TelegramChannelConfig,
     private transport: typeof fetch = fetch,
   ) {}
+
+  /** Durable chat -> thread binding so restarts continue existing conversations. */
+  private threadFor(chatId: number): string | undefined {
+    const cached = this.threadMap.get(chatId);
+    if (cached) return cached;
+    const stored = this.platform.workspace.telegramThread(chatId);
+    if (stored) {
+      this.threadMap.set(chatId, stored);
+      return stored;
+    }
+    return undefined;
+  }
+  private rememberThread(chatId: number, threadId: string) {
+    this.threadMap.set(chatId, threadId);
+    this.platform.workspace.bindTelegramThread(chatId, threadId);
+  }
 
   start() {
     if (this.running) return;
@@ -82,14 +99,15 @@ export class TelegramChannel {
             }
           }
         }
-      } catch (err) {
+      } catch {
         if (signal.aborted) break;
         await new Promise((r) => setTimeout(r, 3000));
       }
     }
   }
 
-  private async handleMessage(
+  /** Processes one Telegram message; public so tests can drive it directly. */
+  async handleMessage(
     token: string,
     message: {
       message_id: number;
@@ -142,12 +160,16 @@ export class TelegramChannel {
     void this.sendChatAction(token, chatId, 'typing');
 
     // Get or create conversation thread for this Telegram chat
-    let threadId = this.threadMap.get(chatId);
+    let threadId = this.threadFor(chatId);
     if (!threadId) {
       const dots = this.platform.workspace.dots();
       const dotId = dots[0]?.id;
       if (!dotId) {
-        await this.sendMessage(token, chatId, 'Error: No Dot found in workspace.');
+        await this.sendMessage(
+          token,
+          chatId,
+          'Error: No Dot found in workspace.',
+        );
         return;
       }
 
@@ -156,7 +178,7 @@ export class TelegramChannel {
         `Telegram: ${message.from?.first_name || message.chat.id}`,
       );
       threadId = conversation.id;
-      this.threadMap.set(chatId, threadId);
+      this.rememberThread(chatId, threadId);
     }
 
     try {
@@ -197,11 +219,14 @@ export class TelegramChannel {
 
   private async sendChatAction(token: string, chatId: number, action: string) {
     try {
-      await this.transport(`https://api.telegram.org/bot${token}/sendChatAction`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, action }),
-      });
+      await this.transport(
+        `https://api.telegram.org/bot${token}/sendChatAction`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, action }),
+        },
+      );
     } catch {
       // ignore
     }

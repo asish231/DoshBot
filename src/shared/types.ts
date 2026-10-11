@@ -7,22 +7,16 @@ export interface Settings {
   memoryAllowed: boolean;
   model?: string | null;
   reasoningEffort?: string | null;
-  computerEnvironment?: string | null;
   voiceProvider?: string | null;
   voiceModel?: string | null;
   voiceName?: string | null;
-  voiceTelephonyProvider?: string | null;
-  /** JSON string: VoiceApiKey[] — ordered list, tried top-to-bottom */
+  /** JSON string: VoiceApiKey[] — ordered list, tried top-to-bottom.
+   *  Values are redacted in API responses; entries carry the '__saved__' sentinel. */
   voiceApiKeys?: string | null;
   telegramBotToken?: string | null;
   telegramAllowedUsers?: string | null;
-  whatsappPhoneNumberId?: string | null;
-  whatsappAccessToken?: string | null;
-  whatsappVerifyToken?: string | null;
-  twilioAccountSid?: string | null;
-  twilioAuthToken?: string | null;
-  twilioPhoneNumber?: string | null;
-  /** JSON string: Connector[] — Local stdio and remote MCP servers */
+  /** JSON string: Connector[] — Local stdio and remote MCP servers.
+   *  Per-connector tokens are redacted in API responses ('__saved__' sentinel). */
   connectors?: string | null;
   /** Active local coding directory path (defaults to process.cwd()) */
   codingDirectory?: string | null;
@@ -32,6 +26,13 @@ export interface Settings {
   codingPermissions?: string | null;
   /** Reasoning effort variant for OpenCode models ('minimal' | 'low' | 'medium' | 'high' | 'max') */
   opencodeVariant?: string | null;
+  /** Presence metadata for redacted credentials (computed server-side, never stored). */
+  secrets?: SettingsSecrets;
+}
+export interface SettingsSecrets {
+  telegramBotToken: boolean;
+  voiceApiKeys: number;
+  connectors: number;
 }
 export interface Connector {
   id: string;
@@ -85,12 +86,7 @@ export interface TaskEvent {
   createdAt: number;
 }
 export type MemoryCategory =
-  | 'preference'
-  | 'fact'
-  | 'instruction'
-  | 'project'
-  | 'goal'
-  | 'general';
+  'preference' | 'fact' | 'instruction' | 'project' | 'goal' | 'general';
 export interface Memory {
   id: string;
   text: string;
@@ -137,6 +133,8 @@ export interface Dot {
   skillDeliveryEnabled?: boolean;
   model?: string | null;
   reasoningEffort?: string | null;
+  /** Monthly estimated-token hard stop for this Dot; null/0 = unlimited. */
+  budgetTokens?: number | null;
 }
 export interface Conversation {
   id: string;

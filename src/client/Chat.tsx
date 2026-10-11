@@ -23,8 +23,8 @@ import {
   PhoneOff,
   Square,
   X,
-  Brain,
   ChevronDown,
+  Brain,
   Search,
   BarChart2,
   Mic,
@@ -49,7 +49,11 @@ import { Mascot } from './Mascot';
 import { useVoice } from './useVoice';
 import { CallView } from './CallView';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
-import { SlashCommandsMenu, SLASH_COMMANDS, type SlashCommand } from './SlashCommandsMenu';
+import {
+  SlashCommandsMenu,
+  SLASH_COMMANDS,
+  type SlashCommand,
+} from './SlashCommandsMenu';
 import { calculateTokenUsage, recordSessionTokenStats } from './token-counter';
 
 interface ChatAttachment {
@@ -69,15 +73,27 @@ function isImageMime(mime: string, name: string): boolean {
 
 function isTextReadable(mime: string, name: string): boolean {
   if (mime.startsWith('text/')) return true;
-  if (mime.includes('json') || mime.includes('javascript') || mime.includes('typescript')) return true;
-  return /\.(ts|tsx|js|jsx|py|go|rs|java|rb|php|c|h|cpp|hpp|cs|swift|kt|kts|dart|lua|r|vue|svelte|css|scss|less|html|md|mdx|txt|json|jsonl|yml|yaml|toml|ini|cfg|sh|bash|zsh|sql|xml|csv|tsv|dockerfile|makefile|gradle|properties|env)$/i.test(name);
+  if (
+    mime.includes('json') ||
+    mime.includes('javascript') ||
+    mime.includes('typescript')
+  )
+    return true;
+  return /\.(ts|tsx|js|jsx|py|go|rs|java|rb|php|c|h|cpp|hpp|cs|swift|kt|kts|dart|lua|r|vue|svelte|css|scss|less|html|md|mdx|txt|json|jsonl|yml|yaml|toml|ini|cfg|sh|bash|zsh|sql|xml|csv|tsv|dockerfile|makefile|gradle|properties|env)$/i.test(
+    name,
+  );
 }
 
 /** Models with no vision input — images sent to these arrive as text only. */
 function isVisionCapableModel(model: string): boolean {
   const m = model.toLowerCase();
-  if (m.includes('deepseek-chat') || m.includes('deepseek-reasoner')) return false;
-  if (m.includes('deepseek-r1') || m.includes('deepseek-v3') && !m.includes('flash')) return false;
+  if (m.includes('deepseek-chat') || m.includes('deepseek-reasoner'))
+    return false;
+  if (
+    m.includes('deepseek-r1') ||
+    (m.includes('deepseek-v3') && !m.includes('flash'))
+  )
+    return false;
   return true;
 }
 
@@ -86,11 +102,17 @@ function isVisionCapableModel(model: string): boolean {
  * (never truncated) data URL. Mirrors OpenCode's drag-drop attach behaviour:
  * screenshots stay PNG, photos compress to JPEG. Max side 1568px.
  */
-function downscaleImage(file: File): Promise<{ dataUrl: string; mime: string }> {
+function downscaleImage(
+  file: File,
+): Promise<{ dataUrl: string; mime: string }> {
   return new Promise((resolve) => {
     const fallback = () => {
       const r = new FileReader();
-      r.onload = () => resolve({ dataUrl: String(r.result || ''), mime: file.type || 'image/png' });
+      r.onload = () =>
+        resolve({
+          dataUrl: String(r.result || ''),
+          mime: file.type || 'image/png',
+        });
       r.readAsDataURL(file);
     };
     try {
@@ -99,7 +121,10 @@ function downscaleImage(file: File): Promise<{ dataUrl: string; mime: string }> 
       img.onload = () => {
         try {
           const MAX = 1568;
-          const scale = Math.min(1, MAX / Math.max(img.width || 1, img.height || 1));
+          const scale = Math.min(
+            1,
+            MAX / Math.max(img.width || 1, img.height || 1),
+          );
           const w = Math.max(1, Math.round((img.width || 1) * scale));
           const h = Math.max(1, Math.round((img.height || 1) * scale));
           const canvas = document.createElement('canvas');
@@ -110,7 +135,10 @@ function downscaleImage(file: File): Promise<{ dataUrl: string; mime: string }> 
           ctx.drawImage(img, 0, 0, w, h);
           URL.revokeObjectURL(url);
           const srcMime = file.type || 'image/png';
-          const outMime = srcMime === 'image/png' || srcMime === 'image/webp' ? srcMime : 'image/jpeg';
+          const outMime =
+            srcMime === 'image/png' || srcMime === 'image/webp'
+              ? srcMime
+              : 'image/jpeg';
           resolve({ dataUrl: canvas.toDataURL(outMime, 0.85), mime: outMime });
         } catch {
           URL.revokeObjectURL(url);
@@ -133,10 +161,12 @@ function formatModelName(model: string): string {
   if (model.includes('ling-3.1-flash-free')) return 'Ling 3.1 Flash (Free)';
   if (model.includes('big-pickle')) return 'Big Pickle (Free)';
   if (model.includes('space-bunny-free')) return 'Space Bunny (Free)';
-  if (model.includes('nemotron-3.5-lightning-free')) return 'Nemotron 3.5 (Free)';
+  if (model.includes('nemotron-3.5-lightning-free'))
+    return 'Nemotron 3.5 (Free)';
   if (model.includes('longcat-2.5-preview-free')) return 'LongCat 2.5 (Free)';
   if (model.includes('mimo-v2.6-flash-free')) return 'Mimo 2.6 (Free)';
-  if (model.includes('muse-spark-1.3-contributor-free')) return 'Muse Spark (Free)';
+  if (model.includes('muse-spark-1.3-contributor-free'))
+    return 'Muse Spark (Free)';
   if (model.includes('sonnet')) return 'Sonnet 3.7';
   if (model.includes('gpt-4o')) return 'GPT-4o';
   if (model.includes('gemini-2.5-pro')) return 'Gemini 2.5 Pro';
@@ -159,9 +189,17 @@ function formatEffortName(effort: string): string {
 
 const EFFORT_LEVELS = [
   { id: 'low', label: 'Low', desc: 'Brief thinking for simple tasks' },
-  { id: 'default', label: 'Medium', desc: 'Balanced analytical reasoning (default)' },
+  {
+    id: 'default',
+    label: 'Medium',
+    desc: 'Balanced analytical reasoning (default)',
+  },
   { id: 'high', label: 'High', desc: 'Deep problem solving & verification' },
-  { id: 'xhigh', label: 'Extra High', desc: 'Intensive reasoning for tough problems' },
+  {
+    id: 'xhigh',
+    label: 'Extra High',
+    desc: 'Intensive reasoning for tough problems',
+  },
   { id: 'max', label: 'Max', desc: 'Maximum reasoning token budget' },
 ];
 
@@ -233,7 +271,9 @@ export function Chat({
   const [loaded, setLoaded] = useState(false);
   const [running, setRunning] = useState(false);
   const [currentModel, setCurrentModel] = useState(dot.model || 'auto-code');
-  const [currentEffort, setCurrentEffort] = useState(dot.reasoningEffort || 'default');
+  const [currentEffort, setCurrentEffort] = useState(
+    dot.reasoningEffort || 'default',
+  );
   const [modelOpen, setModelOpen] = useState(false);
   const [effortOpen, setEffortOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
@@ -257,7 +297,9 @@ export function Chat({
   const [dirSaving, setDirSaving] = useState(false);
   const [browsePath, setBrowsePath] = useState('');
   const [browseParent, setBrowseParent] = useState('');
-  const [browseEntries, setBrowseEntries] = useState<Array<{ name: string; path: string }>>([]);
+  const [browseEntries, setBrowseEntries] = useState<
+    Array<{ name: string; path: string }>
+  >([]);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseError, setBrowseError] = useState('');
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -267,18 +309,23 @@ export function Chat({
     setBrowseLoading(true);
     setBrowseError('');
     try {
-      const res = await fetch(`/api/workspace/browse${target ? `?path=${encodeURIComponent(target)}` : ''}`);
-      const data = await res.json();
-      if (!res.ok) {
-        setBrowseError(data?.error || 'Cannot list folders on this device.');
-        return;
-      }
+      const data = await api<{
+        path: string;
+        parent: string;
+        entries: { name: string; path: string }[];
+      }>(
+        `/workspace/browse${target ? `?path=${encodeURIComponent(target)}` : ''}`,
+      );
       setBrowsePath(data.path);
       setBrowseParent(data.parent);
       setBrowseEntries(data.entries ?? []);
       setBrowseOpen(true);
-    } catch {
-      setBrowseError('Could not reach server to browse folders.');
+    } catch (error) {
+      setBrowseError(
+        error instanceof Error
+          ? error.message
+          : 'Could not reach server to browse folders.',
+      );
     } finally {
       setBrowseLoading(false);
     }
@@ -336,7 +383,9 @@ export function Chat({
         'POST',
       );
       if (res?.compacted) {
-        setCompactMessage('⚡ Context compacted successfully! Token load minimized.');
+        setCompactMessage(
+          '⚡ Context compacted successfully! Token load minimized.',
+        );
         setTimeout(() => setCompactMessage(null), 4000);
         await copilotkit.connectAgent({ agent });
         onSaved();
@@ -344,8 +393,8 @@ export function Chat({
         setCompactMessage('Context is already optimal.');
         setTimeout(() => setCompactMessage(null), 3000);
       }
-    } catch (e: any) {
-      setError(e?.message || 'Could not compact context.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not compact context.');
     } finally {
       setRunning(false);
     }
@@ -357,14 +406,19 @@ export function Chat({
       await api(`/conversations/${thread.id}/clear`, 'POST');
       await copilotkit.connectAgent({ agent });
       onSaved();
-    } catch (e: any) {
-      setError(e?.message || 'Could not clear messages.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not clear messages.');
     }
   };
 
-  const sendSchedule = async (intervalSeconds: number | null, objective: string) => {
+  const sendSchedule = async (
+    intervalSeconds: number | null,
+    objective: string,
+  ) => {
     if (!objective && intervalSeconds !== null) {
-      setError('Tell me what to schedule after the interval, e.g. /schedule 3600 check my inbox');
+      setError(
+        'Tell me what to schedule after the interval, e.g. /schedule 3600 check my inbox',
+      );
       return;
     }
     setError('');
@@ -416,7 +470,9 @@ export function Chat({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (slashMenuOpen) {
-      const query = draft.startsWith('/') ? draft.slice(1).toLowerCase() : draft.toLowerCase();
+      const query = draft.startsWith('/')
+        ? draft.slice(1).toLowerCase()
+        : draft.toLowerCase();
       const filtered = SLASH_COMMANDS.filter(
         (cmd) =>
           cmd.command.toLowerCase().includes(query) ||
@@ -431,11 +487,14 @@ export function Chat({
         }
         if (e.key === 'ArrowUp') {
           e.preventDefault();
-          setSlashSelectedIndex((prev) => (prev - 1 + filtered.length) % filtered.length);
+          setSlashSelectedIndex(
+            (prev) => (prev - 1 + filtered.length) % filtered.length,
+          );
           return;
         }
         if (e.key === 'Enter' || e.key === 'Tab') {
-          const selected = filtered[Math.min(slashSelectedIndex, filtered.length - 1)];
+          const selected =
+            filtered[Math.min(slashSelectedIndex, filtered.length - 1)];
           if (selected) {
             e.preventDefault();
             handleSelectSlashCommand(selected);
@@ -472,17 +531,21 @@ export function Chat({
   const [codingEnabled, setCodingEnabled] = useState(true);
 
   useEffect(() => {
-    fetch('/api/models')
-      .then((res) => res.json())
+    void api<{ models?: string[] }>('/models')
       .then((data) => {
         if (data && Array.isArray(data.models) && data.models.length > 0) {
           setModelOptions(data.models);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        /* model list unavailable; fallback list stays in place */
+      });
 
-    fetch('/api/workspace/directory')
-      .then((res) => res.json())
+    void api<{
+      directory?: string;
+      isGit?: boolean;
+      codingEnabled?: boolean;
+    }>('/workspace/directory')
       .then((data) => {
         if (data && data.directory) {
           setFullDirPath(data.directory);
@@ -490,18 +553,27 @@ export function Chat({
           const parts = data.directory.split('/');
           setConnectedDir(parts[parts.length - 1] || data.directory);
           setDirIsGit(!!data.isGit);
-          if (typeof data.codingEnabled === 'boolean') setCodingEnabled(data.codingEnabled);
+          if (typeof data.codingEnabled === 'boolean')
+            setCodingEnabled(data.codingEnabled);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        /* directory unavailable; folder pill stays in its last state */
+      });
   }, []);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
-      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target as Node)) {
+      if (
+        attachMenuRef.current &&
+        !attachMenuRef.current.contains(e.target as Node)
+      ) {
         setAttachMenuOpen(false);
       }
-      if (dirPopoverRef.current && !dirPopoverRef.current.contains(e.target as Node)) {
+      if (
+        dirPopoverRef.current &&
+        !dirPopoverRef.current.contains(e.target as Node)
+      ) {
         setDirOpen(false);
       }
     };
@@ -511,17 +583,23 @@ export function Chat({
 
   const refreshDirectory = async () => {
     try {
-      const res = await fetch('/api/workspace/directory');
-      const data = await res.json();
+      const data = await api<{
+        directory?: string;
+        isGit?: boolean;
+        codingEnabled?: boolean;
+      }>('/workspace/directory');
       if (data?.directory) {
         setFullDirPath(data.directory);
         setDirDraft(data.directory);
         const parts = data.directory.split('/');
         setConnectedDir(parts[parts.length - 1] || data.directory);
         setDirIsGit(!!data.isGit);
-        if (typeof data.codingEnabled === 'boolean') setCodingEnabled(data.codingEnabled);
+        if (typeof data.codingEnabled === 'boolean')
+          setCodingEnabled(data.codingEnabled);
       }
-    } catch {}
+    } catch {
+      /* refresh is best-effort; keep last known folder state */
+    }
   };
 
   const toggleFolderTools = async () => {
@@ -545,30 +623,32 @@ export function Chat({
     setDirSaving(true);
     setDirStatus('');
     try {
-      const res = await fetch('/api/workspace/directory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ directory: target }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setDirStatus(data?.error || 'Directory not found on server disk.');
-      } else {
-        setFullDirPath(data.directory);
-        const parts = String(data.directory).split('/');
-        setConnectedDir(parts[parts.length - 1] || data.directory);
-        setDirIsGit(!!data.isGit);
-        setDirStatus(`Connected — tools now run in ${data.directory}`);
-        onSaved();
-      }
-    } catch {
-      setDirStatus('Could not reach server to verify directory.');
+      const data = await api<{ directory: string; isGit?: boolean }>(
+        '/workspace/directory',
+        'POST',
+        { directory: target },
+      );
+      setFullDirPath(data.directory);
+      const parts = String(data.directory).split('/');
+      setConnectedDir(parts[parts.length - 1] || data.directory);
+      setDirIsGit(!!data.isGit);
+      setDirStatus(`Connected — tools now run in ${data.directory}`);
+      onSaved();
+    } catch (error) {
+      setDirStatus(
+        error instanceof Error
+          ? error.message
+          : 'Could not reach server to verify directory.',
+      );
     } finally {
       setDirSaving(false);
     }
   };
 
-  const handleFilesSelected = async (files: FileList | File[] | null, forceImage = false) => {
+  const handleFilesSelected = async (
+    files: FileList | File[] | null,
+    forceImage = false,
+  ) => {
     if (!files || files.length === 0) return;
     const list = Array.from(files).slice(0, 8);
     const next: ChatAttachment[] = [];
@@ -586,12 +666,32 @@ export function Chat({
           setError(`"${file.name}" could not be read as an image.`);
           continue;
         }
-        next.push({ id, name: file.name, mime: outMime, size: file.size, kind: 'image', dataUrl });
+        next.push({
+          id,
+          name: file.name,
+          mime: outMime,
+          size: file.size,
+          kind: 'image',
+          dataUrl,
+        });
       } else if (isTextReadable(mime, file.name) && file.size < 1024 * 1024) {
         const textContent = await file.text().catch(() => '');
-        next.push({ id, name: file.name, mime, size: file.size, kind: 'text', textContent: textContent.slice(0, 60000) });
+        next.push({
+          id,
+          name: file.name,
+          mime,
+          size: file.size,
+          kind: 'text',
+          textContent: textContent.slice(0, 60000),
+        });
       } else if (mime === 'application/pdf' || /\.pdf$/i.test(file.name)) {
-        next.push({ id, name: file.name, mime: mime === 'application/octet-stream' ? 'application/pdf' : mime, size: file.size, kind: 'file' });
+        next.push({
+          id,
+          name: file.name,
+          mime: mime === 'application/octet-stream' ? 'application/pdf' : mime,
+          size: file.size,
+          kind: 'file',
+        });
       } else {
         next.push({ id, name: file.name, mime, size: file.size, kind: 'file' });
       }
@@ -613,14 +713,25 @@ export function Chat({
         // Vision models (GPT-4o, Gemini, deepseek-flash, OpenCode vision models)
         // read the markdown image below; text-only models (deepseek-chat/reasoner)
         // should ask the user for a description instead of guessing.
-        parts.push(`\n[Attached image: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB)]\n![${a.name}](${a.dataUrl})`);
+        parts.push(
+          `\n[Attached image: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB)]\n![${a.name}](${a.dataUrl})`,
+        );
       } else if (a.kind === 'text' && a.textContent !== undefined) {
-        const truncated = a.textContent.length >= 60000 ? '\n[content truncated at 60000 chars — ask for the connected folder path to read the rest via str_replace_editor]' : '';
-        parts.push(`\n[Attached file: ${a.name}]\n\`\`\`\n${a.textContent}\n\`\`\`${truncated}`);
+        const truncated =
+          a.textContent.length >= 60000
+            ? '\n[content truncated at 60000 chars — ask for the connected folder path to read the rest via str_replace_editor]'
+            : '';
+        parts.push(
+          `\n[Attached file: ${a.name}]\n\`\`\`\n${a.textContent}\n\`\`\`${truncated}`,
+        );
       } else if (/pdf$/i.test(a.mime) || /\.pdf$/i.test(a.name)) {
-        parts.push(`\n[Attached file: ${a.name} (PDF, ${Math.round(a.size / 1024)}KB) — text was not inlined. If the file lives in the connected coding workspace, read it with str_replace_editor view or bash; otherwise ask the user to paste the relevant text or connect the folder.]`);
+        parts.push(
+          `\n[Attached file: ${a.name} (PDF, ${Math.round(a.size / 1024)}KB) — text was not inlined. If the file lives in the connected coding workspace, read it with str_replace_editor view or bash; otherwise ask the user to paste the relevant text or connect the folder.]`,
+        );
       } else {
-        parts.push(`\n[Attached file: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB) — binary or too large to inline. If it lives in the connected coding workspace, inspect it with str_replace_editor view / bash; otherwise ask the user to paste the relevant excerpt or connect the folder.]`);
+        parts.push(
+          `\n[Attached file: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB) — binary or too large to inline. If it lives in the connected coding workspace, inspect it with str_replace_editor view / bash; otherwise ask the user to paste the relevant excerpt or connect the folder.]`,
+        );
       }
     }
     return parts.join('\n');
@@ -630,7 +741,6 @@ export function Chat({
     setCurrentModel(dot.model || 'auto-code');
     setCurrentEffort(dot.reasoningEffort || 'default');
   }, [dot.model, dot.reasoningEffort]);
-
 
   const handleModelChange = async (newModel: string) => {
     setCurrentModel(newModel);
@@ -648,7 +758,9 @@ export function Chat({
         reasoningEffort: currentEffort,
       });
       onSaved();
-    } catch {}
+    } catch {
+      setError('Could not save the model choice. Reconnect and retry.');
+    }
   };
 
   const handleEffortChange = async (newEffort: string) => {
@@ -667,18 +779,56 @@ export function Chat({
         reasoningEffort: newEffort,
       });
       onSaved();
-    } catch {}
+    } catch {
+      setError('Could not save the effort choice. Reconnect and retry.');
+    }
   };
 
   const voice = useVoice(thread.id, onSaved, agent.messages.at(-1)?.id);
   const sent = useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
+  const autoCallStarted = useRef(false);
+  // Live reasoning stream: deltas land in the ref, UI state follows.
+  const thinkingBuffer = useRef('');
+  const [liveThinking, setLiveThinking] = useState('');
+  const [finishedThinking, setFinishedThinking] = useState('');
+  const [thinkingOpen, setThinkingOpen] = useState(false);
+  useEffect(() => {
+    if (
+      !autoCallStarted.current &&
+      loaded &&
+      voice.status === 'idle' &&
+      sessionStorage.getItem('opendots-autocall') === thread.id
+    ) {
+      autoCallStarted.current = true;
+      sessionStorage.removeItem('opendots-autocall');
+      void voice.start();
+    }
+  }, [loaded, thread.id, voice]);
   useEffect(() => {
     const subscription = copilotkit.subscribe({
       onError: ({ error }) => setError(error.message),
     });
     const events = agent.subscribe({
       onRunErrorEvent: ({ event }) => setError(event.message),
+      // Live chain-of-thought streaming (REASONING_* AG-UI events from
+      // reasoning models — DeepSeek/Qwen/GLM/Kimi style reasoning_content).
+      onReasoningStartEvent: () => {
+        thinkingBuffer.current = '';
+        setLiveThinking('');
+        setThinkingOpen(true);
+      },
+      onReasoningMessageContentEvent: ({ event }) => {
+        if (typeof event.delta === 'string' && event.delta) {
+          thinkingBuffer.current += event.delta;
+          setLiveThinking(thinkingBuffer.current);
+        }
+      },
+      onReasoningEndEvent: () => {
+        if (thinkingBuffer.current) setFinishedThinking(thinkingBuffer.current);
+        setLiveThinking('');
+        setThinkingOpen(false);
+      },
     });
     return () => {
       subscription.unsubscribe();
@@ -705,8 +855,19 @@ export function Chat({
   }, [agent, copilotkit, isReady]);
   const send = async (text: string) => {
     const hasAttachments = attachments.length > 0;
-    if ((!text.trim() && !hasAttachments) || running || !loaded || !contextReady || paused) return;
-    const trimmed = text.trim() || (hasAttachments ? `Please review the attached file(s): ${attachments.map((a) => a.name).join(', ')}` : '');
+    if (
+      (!text.trim() && !hasAttachments) ||
+      running ||
+      !loaded ||
+      !contextReady ||
+      paused
+    )
+      return;
+    const trimmed =
+      text.trim() ||
+      (hasAttachments
+        ? `Please review the attached file(s): ${attachments.map((a) => a.name).join(', ')}`
+        : '');
     if (trimmed === '/compact') {
       void handleCompact();
       return;
@@ -749,7 +910,9 @@ export function Chat({
           textToSave = scopeMatch[2] || memContent;
         }
 
-        const catMatch = textToSave.match(/^\[(preference|fact|instruction|project|goal|note|todo)\]\s*(.*)$/i);
+        const catMatch = textToSave.match(
+          /^\[(preference|fact|instruction|project|goal|note|todo)\]\s*(.*)$/i,
+        );
         if (catMatch) {
           category = catMatch[1].toLowerCase();
           textToSave = catMatch[2] || textToSave;
@@ -757,18 +920,28 @@ export function Chat({
 
         try {
           if (isSession || !isGlobal) {
-            await api(`/conversations/${thread.id}/memories`, 'POST', { text: textToSave, category });
-            setCompactMessage(`Saved session note: "${textToSave.slice(0, 35)}..."`);
+            await api(`/conversations/${thread.id}/memories`, 'POST', {
+              text: textToSave,
+              category,
+            });
+            setCompactMessage(
+              `Saved session note: "${textToSave.slice(0, 35)}..."`,
+            );
           } else {
-            await api('/memories', 'POST', { text: textToSave, category: category === 'note' ? 'general' : category });
-            setCompactMessage(`Saved workspace memory: "${textToSave.slice(0, 35)}..."`);
+            await api('/memories', 'POST', {
+              text: textToSave,
+              category: category === 'note' ? 'general' : category,
+            });
+            setCompactMessage(
+              `Saved workspace memory: "${textToSave.slice(0, 35)}..."`,
+            );
           }
           setTimeout(() => setCompactMessage(null), 3000);
           onSaved();
           setDraft('');
           return;
-        } catch (e: any) {
-          setError(e?.message || 'Could not save memory.');
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Could not save memory.');
           return;
         }
       }
@@ -831,19 +1004,23 @@ export function Chat({
       setRunning(false);
     }
   };
+  const sendLatest = useRef<((text: string) => Promise<void>) | null>(null);
+  useEffect(() => {
+    sendLatest.current = send;
+  });
   useEffect(() => {
     if (loaded && contextReady && !paused && initialPrompt && !sent.current) {
       sent.current = true;
       onConsumed();
-      void send(initialPrompt);
+      void sendLatest.current?.(initialPrompt);
     }
-  }, [loaded, contextReady, paused, initialPrompt]);
+  }, [loaded, contextReady, paused, initialPrompt, onConsumed]);
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'instant', block: 'end' });
   }, [agent.messages.length, running]);
   useEffect(() => {
     if (paused && voice.status !== 'idle') void voice.end();
-  }, [paused]);
+  }, [paused, voice]);
   useHumanInTheLoop(
     {
       name: pageReviewTool.name,
@@ -944,11 +1121,27 @@ export function Chat({
             className={`token-meter-pill ${tokenUsage.status}`}
             title={`Session ${thread.id.slice(0, 8)} — In: ${tokenUsage.inputFormatted} / Out: ${tokenUsage.outputFormatted} / Total: ${tokenUsage.formatted} of ${tokenUsage.maxFormatted} (${tokenUsage.percentage}%). ${tokenUsage.messageCount} msgs. Click to compact context and free cache.`}
             onClick={() => void handleCompact()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                void handleCompact();
+              }
+            }}
             role="button"
             tabIndex={0}
           >
-            <span className="token-meter-text" title={`Input ≈ ${tokenUsage.inputFormatted}`}>↑{tokenUsage.inputFormatted}</span>
-            <span className="token-meter-text" title={`Output ≈ ${tokenUsage.outputFormatted}`}>↓{tokenUsage.outputFormatted}</span>
+            <span
+              className="token-meter-text"
+              title={`Input ≈ ${tokenUsage.inputFormatted}`}
+            >
+              ↑{tokenUsage.inputFormatted}
+            </span>
+            <span
+              className="token-meter-text"
+              title={`Output ≈ ${tokenUsage.outputFormatted}`}
+            >
+              ↓{tokenUsage.outputFormatted}
+            </span>
             <span className="token-meter-pct">({tokenUsage.percentage}%)</span>
           </div>
 
@@ -1046,7 +1239,37 @@ export function Chat({
             />
           )}
         />
-        {running && (
+        {(liveThinking || finishedThinking) && (
+          <div className={`thinking-panel ${thinkingOpen ? 'open' : ''}`}>
+            <button
+              type="button"
+              className="thinking-header"
+              aria-expanded={thinkingOpen}
+              onClick={() => setThinkingOpen(!thinkingOpen)}
+            >
+              <Brain size={13} />
+              <span className="thinking-label">
+                {liveThinking ? 'Thinking…' : 'Thought process'}
+              </span>
+              <span className="thinking-meta">
+                {(liveThinking || finishedThinking).length.toLocaleString()}{' '}
+                chars
+              </span>
+              <span
+                className={`pill-chevron ${thinkingOpen ? 'rotated' : ''}`}
+                aria-hidden="true"
+              >
+                ▾
+              </span>
+            </button>
+            {thinkingOpen && (
+              <pre className="thinking-body" aria-live="polite">
+                {liveThinking || finishedThinking}
+              </pre>
+            )}
+          </div>
+        )}
+        {running && !liveThinking && (
           <div className="thinking">
             <span />
             <span />
@@ -1146,20 +1369,34 @@ export function Chat({
           {attachments.length > 0 && (
             <div className="attach-preview-row">
               {attachments.map((a) => (
-                <div key={a.id} className="attach-chip" title={`${a.name} — ${a.mime}`}>
+                <div
+                  key={a.id}
+                  className="attach-chip"
+                  title={`${a.name} — ${a.mime}`}
+                >
                   {a.kind === 'image' && a.dataUrl ? (
-                    <img src={a.dataUrl} alt={a.name} className="attach-thumb" />
+                    <img
+                      src={a.dataUrl}
+                      alt={a.name}
+                      className="attach-thumb"
+                    />
                   ) : a.kind === 'image' ? (
                     <ImageIcon size={14} />
                   ) : (
                     <FileText size={14} />
                   )}
-                  <span className="attach-name">{a.name.length > 18 ? `${a.name.slice(0, 15)}…` : a.name}</span>
+                  <span className="attach-name">
+                    {a.name.length > 18 ? `${a.name.slice(0, 15)}…` : a.name}
+                  </span>
                   <button
                     type="button"
                     className="attach-remove"
                     aria-label={`Remove ${a.name}`}
-                    onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}
+                    onClick={() =>
+                      setAttachments((prev) =>
+                        prev.filter((x) => x.id !== a.id),
+                      )
+                    }
                   >
                     <X size={12} />
                   </button>
@@ -1167,11 +1404,14 @@ export function Chat({
               ))}
             </div>
           )}
-          {attachments.some((a) => a.kind === 'image') && !isVisionCapableModel(currentModel) && (
-            <div className="dir-status" style={{ margin: '0 0 8px' }}>
-              {currentModel} can&apos;t see images (DeepSeek chat/reasoner are text-only). Describe the image in words, or switch to a vision model such as deepseek-flash, GPT-4o or Gemini.
-            </div>
-          )}
+          {attachments.some((a) => a.kind === 'image') &&
+            !isVisionCapableModel(currentModel) && (
+              <div className="dir-status" style={{ margin: '0 0 8px' }}>
+                {currentModel} can&apos;t see images (DeepSeek chat/reasoner are
+                text-only). Describe the image in words, or switch to a vision
+                model such as deepseek-flash, GPT-4o or Gemini.
+              </div>
+            )}
           <textarea
             ref={textareaRef}
             aria-label="Message your Dot"
@@ -1220,7 +1460,12 @@ export function Chat({
                   type="submit"
                   className="composer-send-btn"
                   aria-label="Send message"
-                  disabled={(!draft.trim() && attachments.length === 0) || !loaded || !contextReady || paused}
+                  disabled={
+                    (!draft.trim() && attachments.length === 0) ||
+                    !loaded ||
+                    !contextReady ||
+                    paused
+                  }
                 >
                   <ArrowUp size={18} strokeWidth={2.5} />
                 </button>
@@ -1242,18 +1487,31 @@ export function Chat({
                       <span>Add context</span>
                       <small>files · images · code</small>
                     </div>
-                    <button type="button" className="chat-popover-item" onClick={() => fileInputRef.current?.click()}>
+                    <button
+                      type="button"
+                      className="chat-popover-item"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
                       <Paperclip size={15} />
                       <div className="chat-effort-col">
                         <span className="chat-item-name">Upload files</span>
-                        <span className="chat-item-desc">Code, docs, text up to 8MB — inlined for the agent</span>
+                        <span className="chat-item-desc">
+                          Code, docs, text up to 8MB — inlined for the agent
+                        </span>
                       </div>
                     </button>
-                    <button type="button" className="chat-popover-item" onClick={() => imageInputRef.current?.click()}>
+                    <button
+                      type="button"
+                      className="chat-popover-item"
+                      onClick={() => imageInputRef.current?.click()}
+                    >
                       <ImageIcon size={15} />
                       <div className="chat-effort-col">
                         <span className="chat-item-name">Upload images</span>
-                        <span className="chat-item-desc">Screenshots, diagrams — auto-compressed, never truncated</span>
+                        <span className="chat-item-desc">
+                          Screenshots, diagrams — auto-compressed, never
+                          truncated
+                        </span>
                       </div>
                     </button>
                     <button
@@ -1267,7 +1525,9 @@ export function Chat({
                       <Link2 size={15} />
                       <div className="chat-effort-col">
                         <span className="chat-item-name">Attach link</span>
-                        <span className="chat-item-desc">Public page for research</span>
+                        <span className="chat-item-desc">
+                          Public page for research
+                        </span>
                       </div>
                     </button>
                     <button
@@ -1282,8 +1542,14 @@ export function Chat({
                     >
                       <FolderOpen size={15} />
                       <div className="chat-effort-col">
-                        <span className="chat-item-name">Connect local folder</span>
-                        <span className="chat-item-desc">{fullDirPath || connectedDir || 'Choose coding directory'}</span>
+                        <span className="chat-item-name">
+                          Connect local folder
+                        </span>
+                        <span className="chat-item-desc">
+                          {fullDirPath ||
+                            connectedDir ||
+                            'Choose coding directory'}
+                        </span>
                       </div>
                     </button>
                   </div>
@@ -1301,11 +1567,25 @@ export function Chat({
                     setDirStatus('');
                     setDirOpen(!dirOpen);
                   }}
-                  title={codingEnabled ? (fullDirPath ? `Coding workspace: ${fullDirPath}. Click to change (Claude / DSH-style local folder).` : 'Connect a local folder to code in (Claude / DSH-style)') : 'Folder tools are off — click to turn them on.'}
+                  title={
+                    codingEnabled
+                      ? fullDirPath
+                        ? `Coding workspace: ${fullDirPath}. Click to change (Claude / DSH-style local folder).`
+                        : 'Connect a local folder to code in (Claude / DSH-style)'
+                      : 'Folder tools are off — click to turn them on.'
+                  }
                 >
                   <FolderGit2 size={14} />
-                  <span>{codingEnabled ? (connectedDir || 'Connect folder') : 'No folder'}</span>
-                  {codingEnabled && dirIsGit && <span className="dir-git-dot" title="Git repo detected">●</span>}
+                  <span>
+                    {codingEnabled
+                      ? connectedDir || 'Connect folder'
+                      : 'No folder'}
+                  </span>
+                  {codingEnabled && dirIsGit && (
+                    <span className="dir-git-dot" title="Git repo detected">
+                      ●
+                    </span>
+                  )}
                 </button>
                 {dirOpen && (
                   <div className="chat-popover-menu dir-menu">
@@ -1314,13 +1594,26 @@ export function Chat({
                       <small>{dirIsGit ? 'git repo' : 'local fs'}</small>
                     </div>
                     <div className="dir-picker-body">
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 0 8px' }}>
-                        <span className="chat-item-desc" style={{ margin: 0 }}>Folder tools</span>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          margin: '0 0 8px',
+                        }}
+                      >
+                        <span className="chat-item-desc" style={{ margin: 0 }}>
+                          Folder tools
+                        </span>
                         <button
                           type="button"
                           role="switch"
                           aria-checked={codingEnabled}
-                          title={codingEnabled ? 'Turn folder tools off (chat without local files)' : 'Turn folder tools on (chat with local files)'}
+                          title={
+                            codingEnabled
+                              ? 'Turn folder tools off (chat without local files)'
+                              : 'Turn folder tools on (chat with local files)'
+                          }
                           onClick={() => void toggleFolderTools()}
                           style={{
                             minWidth: 52,
@@ -1335,10 +1628,19 @@ export function Chat({
                           {codingEnabled ? 'On' : 'Off'}
                         </button>
                       </div>
-                      <p className="chat-item-desc" style={{ margin: '0 0 8px' }}>
-                        {codingEnabled
-                          ? <>Agent runs <code>str_replace_editor</code>, <code>bash</code>, <code>code_interpreter</code> here.</>
-                          : 'Folder tools are off — the agent chats without reading or editing local files.'}
+                      <p
+                        className="chat-item-desc"
+                        style={{ margin: '0 0 8px' }}
+                      >
+                        {codingEnabled ? (
+                          <>
+                            Agent runs <code>str_replace_editor</code>,{' '}
+                            <code>bash</code>, <code>code_interpreter</code>{' '}
+                            here.
+                          </>
+                        ) : (
+                          'Folder tools are off — the agent chats without reading or editing local files.'
+                        )}
                       </p>
                       <input
                         type="text"
@@ -1353,28 +1655,89 @@ export function Chat({
                           Current: {fullDirPath}
                         </div>
                       )}
-                      {dirStatus && <div className="dir-status">{dirStatus}</div>}
+                      {dirStatus && (
+                        <div className="dir-status">{dirStatus}</div>
+                      )}
                       {browseOpen && (
-                        <div className="dir-current" style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
-                          <div title={browsePath} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div
+                          className="dir-current"
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                            alignItems: 'stretch',
+                          }}
+                        >
+                          <div
+                            title={browsePath}
+                            style={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
                             {browsePath || '…'}
                           </div>
-                          {browseError && <div className="dir-status">{browseError}</div>}
+                          {browseError && (
+                            <div className="dir-status">{browseError}</div>
+                          )}
                           <div style={{ display: 'flex', gap: 6 }}>
-                            <button type="button" disabled={browseLoading || !browseParent || browseParent === browsePath} onClick={() => void loadBrowse(browseParent)}>
+                            <button
+                              type="button"
+                              disabled={
+                                browseLoading ||
+                                !browseParent ||
+                                browseParent === browsePath
+                              }
+                              onClick={() => void loadBrowse(browseParent)}
+                            >
                               ↑ Up
                             </button>
-                            <button type="button" disabled={browseLoading || !browsePath} onClick={() => { setDirDraft(browsePath); setBrowseOpen(false); setDirStatus(''); }}>
+                            <button
+                              type="button"
+                              disabled={browseLoading || !browsePath}
+                              onClick={() => {
+                                setDirDraft(browsePath);
+                                setBrowseOpen(false);
+                                setDirStatus('');
+                              }}
+                            >
                               Use this folder
                             </button>
                           </div>
-                          <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            {browseLoading && <span className="chat-item-desc">Listing device folders…</span>}
-                            {!browseLoading && browseEntries.length === 0 && !browseError && (
-                              <span className="chat-item-desc">No subfolders here.</span>
+                          <div
+                            style={{
+                              maxHeight: 180,
+                              overflowY: 'auto',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 2,
+                            }}
+                          >
+                            {browseLoading && (
+                              <span className="chat-item-desc">
+                                Listing device folders…
+                              </span>
                             )}
+                            {!browseLoading &&
+                              browseEntries.length === 0 &&
+                              !browseError && (
+                                <span className="chat-item-desc">
+                                  No subfolders here.
+                                </span>
+                              )}
                             {browseEntries.map((e) => (
-                              <button key={e.path} type="button" title={e.path} style={{ justifyContent: 'flex-start', fontFamily: 'monospace', fontSize: '12px' }} onClick={() => void loadBrowse(e.path)}>
+                              <button
+                                key={e.path}
+                                type="button"
+                                title={e.path}
+                                style={{
+                                  justifyContent: 'flex-start',
+                                  fontFamily: 'monospace',
+                                  fontSize: '12px',
+                                }}
+                                onClick={() => void loadBrowse(e.path)}
+                              >
                                 <FolderOpen size={13} /> {e.name}
                               </button>
                             ))}
@@ -1390,7 +1753,11 @@ export function Chat({
                             else void loadBrowse();
                           }}
                         >
-                          {browseLoading ? 'Browsing…' : browseOpen ? 'Hide folders' : 'Browse…'}
+                          {browseLoading
+                            ? 'Browsing…'
+                            : browseOpen
+                              ? 'Hide folders'
+                              : 'Browse…'}
                         </button>
                         <button
                           type="button"
@@ -1475,7 +1842,9 @@ export function Chat({
                               setChatModelSearch('');
                             }}
                           >
-                            <span className="chat-item-name">{formatModelName(m)}</span>
+                            <span className="chat-item-name">
+                              {formatModelName(m)}
+                            </span>
                             <span className="chat-item-id">{m}</span>
                             {currentModel === m && (
                               <span className="chat-item-check">✓</span>
@@ -1540,6 +1909,15 @@ export function Chat({
               <div className="composer-divider" />
 
               {/* Mic Speech-to-Text Button */}
+              {stt.errorMessage && (
+                <span
+                  className="composer-error-note"
+                  role="alert"
+                  title={stt.errorMessage}
+                >
+                  {stt.errorMessage}
+                </span>
+              )}
               <button
                 type="button"
                 className={`composer-icon-btn ${stt.isRecording ? 'recording' : ''} ${stt.isTranscribing ? 'transcribing' : ''}`}
@@ -1549,7 +1927,9 @@ export function Chat({
                     ? 'Listening... Click to finish speaking'
                     : stt.isTranscribing
                       ? 'Transcribing speech...'
-                      : `Dictate message (${stt.sttModel})`
+                      : stt.errorMessage
+                        ? stt.errorMessage
+                        : `Dictate message (${stt.sttModel})`
                 }
                 onClick={() => void stt.toggleRecording()}
               >
@@ -1642,7 +2022,9 @@ export function Chat({
                                 </span>
                               )}
                             </div>
-                            <span className="stt-model-desc">{m.description}</span>
+                            <span className="stt-model-desc">
+                              {m.description}
+                            </span>
                           </div>
                           {stt.sttModel === m.id && (
                             <span className="chat-item-check">✓</span>

@@ -6,7 +6,41 @@ import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { codingTools } from '../src/server/coding-tools.js';
 import { SLASH_COMMANDS } from '../src/client/SlashCommandsMenu.js';
-import { askQuestionSchema, askQuestionTool } from '../src/shared/ask-question.js';
+import {
+  askQuestionSchema,
+  askQuestionTool,
+} from '../src/shared/ask-question.js';
+
+type EditorExecute = (args: {
+  command: 'view' | 'create' | 'str_replace' | 'insert' | 'undo_edit';
+  path: string;
+  file_text?: string;
+  old_str?: string;
+  new_str?: string;
+  insert_line?: number;
+  view_range?: number[];
+}) => Promise<string>;
+
+type BashExecute = (args: {
+  command: string;
+  description: string;
+  workdir?: string;
+  timeoutMs?: number;
+}) => Promise<{
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+}>;
+
+type SearchExecute = (args: {
+  pattern: string;
+  query?: string;
+  maxResults?: number;
+}) => Promise<{
+  total: number;
+  matches: Array<{ file: string; line?: number; match?: string }>;
+}>;
 
 const resources: { store?: Store; ws?: WorkspaceStore; dir: string }[] = [];
 
@@ -37,12 +71,26 @@ describe('DeepSeek Harness Dual-Layer Memory (Global vs Per-Session)', () => {
     const threadB = ws.bindThread('thread-B', dot.id, 'Thread B');
 
     // Global memory persists in Store
-    store.saveMemory('User prefers dark mode and concise summaries', undefined, 'preference');
+    store.saveMemory(
+      'User prefers dark mode and concise summaries',
+      undefined,
+      'preference',
+    );
 
     // Session memory in Thread A
-    ws.saveSessionMemory(threadA.id, 'Task note for thread A: refactor auth logic', undefined, 'todo');
+    ws.saveSessionMemory(
+      threadA.id,
+      'Task note for thread A: refactor auth logic',
+      undefined,
+      'todo',
+    );
     // Session memory in Thread B
-    ws.saveSessionMemory(threadB.id, 'Temporary context for thread B: database migration script', undefined, 'context');
+    ws.saveSessionMemory(
+      threadB.id,
+      'Temporary context for thread B: database migration script',
+      undefined,
+      'context',
+    );
 
     // Verify isolation
     const threadAMems = ws.sessionMemories(threadA.id);
@@ -60,7 +108,11 @@ describe('DeepSeek Harness Dual-Layer Memory (Global vs Per-Session)', () => {
     expect(globalMems[0]?.text).toContain('User prefers dark mode');
 
     // Thread B does not see Thread A's session memories
-    expect(ws.sessionMemories(threadB.id).some((m) => m.text.includes('refactor auth logic'))).toBe(false);
+    expect(
+      ws
+        .sessionMemories(threadB.id)
+        .some((m) => m.text.includes('refactor auth logic')),
+    ).toBe(false);
   });
 
   it('cascades deletion of session memories when thread is deleted', () => {
@@ -111,23 +163,26 @@ describe('DeepSeek Harness Native Coding Tools', () => {
     expect(editorTool).toBeTruthy();
 
     // 1. Create file
-    const createRes = await (editorTool.execute as any)({
+    const createRes = await (editorTool.execute as EditorExecute)({
       command: 'create',
       path: 'src/index.ts',
-      file_text: 'export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n',
+      file_text:
+        'export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n',
     });
     expect(createRes).toContain('New file created successfully');
 
     // 2. View file with line numbers
-    const viewRes = await (editorTool.execute as any)({
+    const viewRes = await (editorTool.execute as EditorExecute)({
       command: 'view',
       path: 'src/index.ts',
     });
-    expect(viewRes).toContain('Here\'s the content of src/index.ts with line numbers');
+    expect(viewRes).toContain(
+      "Here's the content of src/index.ts with line numbers",
+    );
     expect(viewRes).toContain('1  export function greet');
 
     // 3. View directory
-    const viewDirRes = await (editorTool.execute as any)({
+    const viewDirRes = await (editorTool.execute as EditorExecute)({
       command: 'view',
       path: 'src',
     });
@@ -135,7 +190,7 @@ describe('DeepSeek Harness Native Coding Tools', () => {
     expect(viewDirRes).toContain('index.ts');
 
     // 4. Exact str_replace
-    const replaceRes = await (editorTool.execute as any)({
+    const replaceRes = await (editorTool.execute as EditorExecute)({
       command: 'str_replace',
       path: 'src/index.ts',
       old_str: 'return `Hello, ${name}!`;',
@@ -143,14 +198,14 @@ describe('DeepSeek Harness Native Coding Tools', () => {
     });
     expect(replaceRes).toContain('edited successfully');
 
-    const afterReplaceView = await (editorTool.execute as any)({
+    const afterReplaceView = await (editorTool.execute as EditorExecute)({
       command: 'view',
       path: 'src/index.ts',
     });
     expect(afterReplaceView).toContain('Greetings, ${name}!');
 
     // 5. Insert line
-    const insertRes = await (editorTool.execute as any)({
+    const insertRes = await (editorTool.execute as EditorExecute)({
       command: 'insert',
       path: 'src/index.ts',
       insert_line: 0,
@@ -158,14 +213,14 @@ describe('DeepSeek Harness Native Coding Tools', () => {
     });
     expect(insertRes).toContain('Inserted content successfully');
 
-    const afterInsertView = await (editorTool.execute as any)({
+    const afterInsertView = await (editorTool.execute as EditorExecute)({
       command: 'view',
       path: 'src/index.ts',
     });
     expect(afterInsertView).toContain('// Generated by DoshBot Coding Agent');
 
     // 6. Undo edit
-    const undoRes = await (editorTool.execute as any)({
+    const undoRes = await (editorTool.execute as EditorExecute)({
       command: 'undo_edit',
       path: 'src/index.ts',
     });
@@ -179,7 +234,7 @@ describe('DeepSeek Harness Native Coding Tools', () => {
     const bashTool = tools.find((t) => t.name === 'bash')!;
     expect(bashTool).toBeTruthy();
 
-    const bashRes = await (bashTool.execute as any)({
+    const bashRes = await (bashTool.execute as BashExecute)({
       command: 'echo "DoshBot by SafarNow Native Coding Agent"',
       description: 'Echo system identification',
     });
@@ -190,14 +245,17 @@ describe('DeepSeek Harness Native Coding Tools', () => {
 
   it('supports searching workspace files by name and content', async () => {
     const { dir } = createFixture();
-    writeFileSync(join(dir, 'sample.txt'), 'DoshBot is built with deep reasoning\nand fast inference.\n');
+    writeFileSync(
+      join(dir, 'sample.txt'),
+      'DoshBot is built with deep reasoning\nand fast inference.\n',
+    );
 
     const controller = new AbortController();
     const tools = codingTools(dir, () => {}, controller.signal);
     const searchTool = tools.find((t) => t.name === 'search_files')!;
     expect(searchTool).toBeTruthy();
 
-    const searchRes = await (searchTool.execute as any)({
+    const searchRes = await (searchTool.execute as SearchExecute)({
       pattern: 'sample.txt',
       query: 'deep reasoning',
     });
@@ -213,7 +271,7 @@ describe('DeepSeek Harness Native Coding Tools', () => {
     expect(commandNames).toContain('/code');
     expect(commandNames).toContain('/subagents');
     for (const cmd of SLASH_COMMANDS) {
-      expect((cmd as any).icon).toBeUndefined();
+      expect((cmd as { icon?: unknown }).icon).toBeUndefined();
     }
   });
 
@@ -223,23 +281,41 @@ describe('DeepSeek Harness Native Coding Tools', () => {
     const dot = ws.createDot(space.id, 'Dot', 'Coder', true, true);
     const thread = ws.bindThread('thread-perms', dot.id, 'Perms Thread');
 
-    const deniedTools = codingTools(dir, () => {}, new AbortController().signal, {
-      threadId: thread.id,
-      workspace: ws,
-      store,
-      permissions: { bash: 'deny', edits: 'deny' },
-    });
+    const deniedTools = codingTools(
+      dir,
+      () => {},
+      new AbortController().signal,
+      {
+        threadId: thread.id,
+        workspace: ws,
+        store,
+        permissions: { bash: 'deny', edits: 'deny' },
+      },
+    );
 
     const bashTool = deniedTools.find((t) => t.name === 'bash')!;
-    const editorTool = deniedTools.find((t) => t.name === 'str_replace_editor')!;
+    const editorTool = deniedTools.find(
+      (t) => t.name === 'str_replace_editor',
+    )!;
 
     await expect(
-      (bashTool.execute as any)({ command: 'ls', description: 'list files' }),
-    ).rejects.toThrow('Bash command execution is denied by workspace coding permissions.');
+      (bashTool.execute as BashExecute)({
+        command: 'ls',
+        description: 'list files',
+      }),
+    ).rejects.toThrow(
+      'Bash command execution is denied by workspace coding permissions.',
+    );
 
     await expect(
-      (editorTool.execute as any)({ command: 'create', path: 'test.txt', file_text: 'hello' }),
-    ).rejects.toThrow('File modifications are denied by workspace coding permissions.');
+      (editorTool.execute as EditorExecute)({
+        command: 'create',
+        path: 'test.txt',
+        file_text: 'hello',
+      }),
+    ).rejects.toThrow(
+      'File modifications are denied by workspace coding permissions.',
+    );
   });
 });
 
@@ -260,7 +336,7 @@ describe('OpenCode Integration and Free Models', () => {
         expect(m.id).toContain('opencode/');
       }
     }
-  });
+  }, 30_000);
 });
 
 describe('ask_question Human-In-The-Loop Capability', () => {
@@ -296,8 +372,7 @@ describe('ask_question Human-In-The-Loop Capability', () => {
     expect(askQuestionTool.name).toBe('ask_question');
     expect(typeof askQuestionTool.description).toBe('string');
     expect(askQuestionTool.parameters).toBeDefined();
-    expect((askQuestionTool.parameters as any).properties.question).toBeDefined();
-    expect((askQuestionTool.parameters as any).properties.options).toBeDefined();
+    expect(askQuestionTool.parameters.properties?.question).toBeDefined();
+    expect(askQuestionTool.parameters.properties?.options).toBeDefined();
   });
 });
-

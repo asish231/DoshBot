@@ -11,6 +11,7 @@ import {
   learningContainerIdSchema,
   validateLearningSettings,
 } from '../shared/learning.js';
+import type { Settings } from '../shared/types.js';
 const dotSchema = z
   .object({
     name: z.string().trim().min(1).max(40),
@@ -23,6 +24,13 @@ const dotSchema = z
     spaceId: z.string().min(1).optional(),
     model: z.string().trim().max(120).nullable().optional(),
     reasoningEffort: z.string().trim().max(50).nullable().optional(),
+    budgetTokens: z
+      .number()
+      .int()
+      .min(0)
+      .max(10_000_000_000)
+      .nullable()
+      .optional(),
   })
   .strict();
 export function workspaceRoutes(platform: Platform, voice: VoiceService) {
@@ -49,13 +57,19 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         if (platform.config.apiKey) {
           headers['Authorization'] = `Bearer ${platform.config.apiKey}`;
         }
-        const res = await fetch(url, { headers, signal: AbortSignal.timeout(4000) });
+        const res = await fetch(url, {
+          headers,
+          signal: AbortSignal.timeout(4000),
+        });
         if (res.ok) {
           const body = (await res.json()) as { data?: Array<{ id?: string }> };
           if (Array.isArray(body.data)) {
             const fetched = body.data
               .map((m) => m.id)
-              .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+              .filter(
+                (id): id is string =>
+                  typeof id === 'string' && id.trim().length > 0,
+              );
             if (fetched.length > 0) {
               cachedModels = Array.from(new Set(fetched));
               lastFetchTime = now;
@@ -111,14 +125,26 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       if (opencode.available) {
         opencodeFreeModelIds = opencode.freeModels.map((m) => m.id);
       }
-    } catch {}
+    } catch {
+      /* opencode status unavailable — continue without free models */
+    }
 
-    const models = Array.from(new Set([...cachedModels, ...opencodeFreeModelIds, ...fallbackList]));
+    const models = Array.from(
+      new Set([...cachedModels, ...opencodeFreeModelIds, ...fallbackList]),
+    );
 
     return c.json({
       defaultModel: platform.config.model,
       models,
-      reasoningEfforts: ['default', 'none', 'low', 'medium', 'high', 'xhigh', 'max'],
+      reasoningEfforts: [
+        'default',
+        'none',
+        'low',
+        'medium',
+        'high',
+        'xhigh',
+        'max',
+      ],
       opencode,
     });
   });
@@ -154,7 +180,9 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       if (settings.codingPermissions) {
         permissions = JSON.parse(settings.codingPermissions);
       }
-    } catch {}
+    } catch {
+      /* invalid permissions JSON — keep defaults */
+    }
     return c.json({
       directory: dir,
       exists,
@@ -180,17 +208,23 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       return c.json({ error: 'Valid directory path is required.' }, 400);
     }
     if (!existsSync(data.data.directory)) {
-      return c.json({ error: `Directory does not exist on disk: ${data.data.directory}` }, 404);
+      return c.json(
+        { error: `Directory does not exist on disk: ${data.data.directory}` },
+        404,
+      );
     }
-    const patch: any = { codingDirectory: data.data.directory };
+    const patch: Partial<Settings> = { codingDirectory: data.data.directory };
     if (data.data.permissions) {
       patch.codingPermissions = JSON.stringify(data.data.permissions);
     }
     const updated = platform.store.updateSettings(patch);
     let perms = { bash: 'auto', edits: 'auto' };
     try {
-      if (updated.codingPermissions) perms = JSON.parse(updated.codingPermissions);
-    } catch {}
+      if (updated.codingPermissions)
+        perms = JSON.parse(updated.codingPermissions);
+    } catch {
+      /* invalid permissions JSON — keep defaults */
+    }
     return c.json({
       directory: updated.codingDirectory,
       permissions: perms,
@@ -208,7 +242,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     if (!existsSync(dir)) {
       return c.json({ error: `Directory does not exist: ${dir}` }, 404);
     }
-    let entries: Array<{ name: string; path: string }> = [];
+    const entries: Array<{ name: string; path: string }> = [];
     try {
       const names = readdirSync(dir);
       for (const name of names) {
@@ -217,13 +251,20 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         const full = join(dir, name);
         try {
           if (statSync(full).isDirectory()) entries.push({ name, path: full });
-        } catch {}
+        } catch {
+          /* stat failed — skip entry */
+        }
       }
       entries.sort((a, b) => a.name.localeCompare(b.name));
     } catch {
       return c.json({ error: `Cannot read directory: ${dir}` }, 403);
     }
-    return c.json({ path: dir, parent: dirname(dir), home: homedir(), entries });
+    return c.json({
+      path: dir,
+      parent: dirname(dir),
+      home: homedir(),
+      entries,
+    });
   });
 
   app.get('/conversations/:threadId/session-memories', (c) => {
@@ -324,9 +365,24 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         data.data.skillDeliveryEnabled,
         data.data.model ?? null,
         data.data.reasoningEffort ?? null,
+        data.data.budgetTokens ?? null,
       ),
       201,
     );
+  });
+  app.get('/dots/:id/usage', (c) => {
+    const dot = platform.workspace.dot(c.req.param('id'));
+    if (!dot) return c.json({ error: 'Dot not found.' }, 404);
+    return c.json({
+      monthlyTokens: platform.workspace.monthlyUsage(dot.id),
+      budgetTokens: dot.budgetTokens ?? null,
+    });
+  });
+  app.post('/dots/:id/usage/reset', (c) => {
+    const dot = platform.workspace.dot(c.req.param('id'));
+    if (!dot) return c.json({ error: 'Dot not found.' }, 404);
+    platform.workspace.resetUsage(dot.id);
+    return c.json({ monthlyTokens: 0, budgetTokens: dot.budgetTokens ?? null });
   });
   app.put('/dots/:id', async (c) => {
     const data = dotSchema.safeParse(await c.req.json());
@@ -379,9 +435,13 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     try {
       platform.workspace.deleteThread(id);
       return c.json({ success: true, id });
-    } catch (e: any) {
+    } catch (e) {
       return c.json(
-        { error: e?.message || 'Could not delete conversation.' },
+        {
+          error:
+            (e instanceof Error && e.message) ||
+            'Could not delete conversation.',
+        },
         500,
       );
     }
@@ -392,13 +452,20 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       .object({ title: z.string().trim().min(1).max(120) })
       .safeParse(await c.req.json());
     if (!data.success)
-      return c.json({ error: 'A conversation title (1-120 chars) is required.' }, 400);
+      return c.json(
+        { error: 'A conversation title (1-120 chars) is required.' },
+        400,
+      );
     try {
       platform.workspace.updateThread(id, { title: data.data.title });
       return c.json({ success: true, id, title: data.data.title });
-    } catch (e: any) {
+    } catch (e) {
       return c.json(
-        { error: e?.message || 'Could not rename conversation.' },
+        {
+          error:
+            (e instanceof Error && e.message) ||
+            'Could not rename conversation.',
+        },
         500,
       );
     }
@@ -417,8 +484,15 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     try {
       const result = platform.workspace.compactThreadMessages(id);
       return c.json({ success: true, ...result });
-    } catch (e: any) {
-      return c.json({ error: e?.message || 'Could not compact conversation context.' }, 500);
+    } catch (e) {
+      return c.json(
+        {
+          error:
+            (e instanceof Error && e.message) ||
+            'Could not compact conversation context.',
+        },
+        500,
+      );
     }
   });
   app.post('/conversations/:id/clear', (c) => {
@@ -426,8 +500,14 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     try {
       platform.workspace.clearThreadMessages(id);
       return c.json({ success: true, id });
-    } catch (e: any) {
-      return c.json({ error: e?.message || 'Could not clear messages.' }, 500);
+    } catch (e) {
+      return c.json(
+        {
+          error:
+            (e instanceof Error && e.message) || 'Could not clear messages.',
+        },
+        500,
+      );
     }
   });
   app.get('/conversations/:id/capture', (c) =>
@@ -496,7 +576,10 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       .strict()
       .safeParse(await c.req.json());
     if (!data.success) {
-      return c.json({ error: 'Audio data is required for transcription.' }, 400);
+      return c.json(
+        { error: 'Audio data is required for transcription.' },
+        400,
+      );
     }
     const { audio, mimeType, model } = data.data;
 
@@ -524,7 +607,9 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
           signal: AbortSignal.timeout(10000),
         });
         if (tmRes.ok) {
-          const tmJson = (await tmRes.json()) as any;
+          const tmJson = (await tmRes.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+          };
           const text = tmJson.choices?.[0]?.message?.content?.trim();
           if (text && !text.toLowerCase().includes('image you uploaded')) {
             return c.json({ text });
@@ -538,12 +623,17 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     const settings = platform.store.settings();
     let geminiKey = platform.config.voiceKey;
     try {
-      const keys = JSON.parse(settings.voiceApiKeys || '[]');
+      const keys = JSON.parse(settings.voiceApiKeys || '[]') as Array<{
+        provider?: string;
+        key?: string;
+      }>;
       const match = keys.find(
-        (k: any) => k.provider === 'gemini' || k.provider === 'any',
+        (k) => k.provider === 'gemini' || k.provider === 'any',
       );
       if (match?.key) geminiKey = match.key;
-    } catch {}
+    } catch {
+      /* invalid voiceApiKeys JSON — keep default key */
+    }
 
     if (!geminiKey) {
       return c.json(
@@ -595,7 +685,11 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       );
     }
 
-    const body = (await geminiRes.json()) as any;
+    const body = (await geminiRes.json()) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+    };
     let transcribedText =
       body.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
 

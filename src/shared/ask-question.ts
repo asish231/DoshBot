@@ -2,7 +2,12 @@ import { z } from 'zod';
 
 export const askQuestionSchema = z
   .object({
-    question: z.string().trim().min(1).max(500).describe('The question to ask the user.'),
+    question: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      .describe('The question to ask the user.'),
     options: z
       .array(z.string().trim().min(1).max(200))
       .min(2)

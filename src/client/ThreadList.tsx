@@ -25,9 +25,17 @@ export function ThreadList({
   onDelete?: (id: string) => void;
   onClearAll?: () => void;
 }) {
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
-  const [menu, setMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{
+    id: string;
+    title: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
 
@@ -68,7 +76,14 @@ export function ThreadList({
 
   return (
     <section className="thread-list">
-      <div className="nav-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div
+        className="nav-label"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
         <span>RECENT CHATS</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           {local.length > 0 && onClearAll && (
@@ -136,12 +151,18 @@ export function ThreadList({
                       if (e.key === 'Escape') setRenamingId(null);
                     }}
                     onBlur={() => commitRename(thread.id, title)}
-                    style={{ font: 'inherit', width: '100%', padding: '2px 6px' }}
+                    style={{
+                      font: 'inherit',
+                      width: '100%',
+                      padding: '2px 6px',
+                    }}
                   />
                 ) : (
                   <span>{title}</span>
                 )}
-                <small>{dots.find((dot) => dot.id === thread.dotId)?.name}</small>
+                <small>
+                  {dots.find((dot) => dot.id === thread.dotId)?.name}
+                </small>
               </span>
             </button>
             {onDelete && !renaming && (
@@ -184,7 +205,11 @@ export function ThreadList({
           onContextMenu={(e) => e.preventDefault()}
         >
           {onRename && (
-            <button type="button" role="menuitem" onClick={() => startRename(menu.id, menu.title)}>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => startRename(menu.id, menu.title)}
+            >
               <Pencil size={13} /> Rename
             </button>
           )}

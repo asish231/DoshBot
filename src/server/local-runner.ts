@@ -17,15 +17,16 @@ export class PersistentLocalRunner extends InMemoryAgentRunner {
     // 1. Hook appendRun on the global store singleton once so all completed runs persist to SQLite
     if (!PersistentLocalRunner.storeHooked) {
       PersistentLocalRunner.storeHooked = true;
-      const origAppendRun = (ɵGLOBAL_STORE as any).appendRun.bind(ɵGLOBAL_STORE);
-      (ɵGLOBAL_STORE as any).appendRun = (threadId: string, run: any) => {
-        const messagesToSave = Array.isArray(run.messages) && run.messages.length > 0
-          ? [...run.messages]
-          : ((ɵGLOBAL_STORE as any).peek(threadId)?.messagesSnapshot ?? []);
+      const origAppendRun = ɵGLOBAL_STORE.appendRun.bind(ɵGLOBAL_STORE);
+      ɵGLOBAL_STORE.appendRun = (threadId, run) => {
+        const messagesToSave =
+          Array.isArray(run.messages) && run.messages.length > 0
+            ? [...run.messages]
+            : (ɵGLOBAL_STORE.peek(threadId)?.messagesSnapshot ?? []);
         origAppendRun(threadId, run);
         try {
           const eventsToSave = Array.isArray(run.events)
-            ? run.events.filter((e: any) => e?.type !== 'RUN_ERROR')
+            ? run.events.filter((e) => e?.type !== 'RUN_ERROR')
             : [];
           this.workspace.saveThreadRun({
             id: run.runId || `${threadId}-${Date.now()}`,
@@ -46,7 +47,7 @@ export class PersistentLocalRunner extends InMemoryAgentRunner {
     try {
       const convs = this.workspace.conversations();
       for (const conv of convs) {
-        const store = (ɵGLOBAL_STORE as any).getOrCreate(conv.id);
+        const store = ɵGLOBAL_STORE.getOrCreate(conv.id);
         if (store.createdAt === null) {
           store.createdAt = conv.createdAt;
         }
@@ -57,7 +58,7 @@ export class PersistentLocalRunner extends InMemoryAgentRunner {
         try {
           const rawEvents = JSON.parse(row.events);
           const messages = JSON.parse(row.messages);
-          const store = (ɵGLOBAL_STORE as any).getOrCreate(row.threadId);
+          const store = ɵGLOBAL_STORE.getOrCreate(row.threadId);
           if (store.createdAt === null) {
             store.createdAt = row.createdAt;
           }

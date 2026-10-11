@@ -265,7 +265,9 @@ it('registers the full agentic toolset (coding, swarm, schedules, memory, resear
   );
   expect(network).toHaveBeenCalledTimes(1);
   const request = JSON.parse(String(network.mock.calls[0][1]?.body));
-  const names = (request.tools ?? []).map((t: any) => t.function?.name);
+  const names = (request.tools ?? []).map(
+    (t: { function?: { name?: string } }) => t.function?.name,
+  );
   for (const name of [
     'str_replace_editor',
     'bash',
@@ -293,7 +295,9 @@ it('drops folder-bound tools when the folder toggle is off but keeps memory', as
     );
   await lastValueFrom(f.agent.run(f.input).pipe(toArray()));
   const request = JSON.parse(String(network.mock.calls[0][1]?.body));
-  const names = (request.tools ?? []).map((t: any) => t.function?.name);
+  const names = (request.tools ?? []).map(
+    (t: { function?: { name?: string } }) => t.function?.name,
+  );
   for (const name of [
     'str_replace_editor',
     'bash',
@@ -304,7 +308,11 @@ it('drops folder-bound tools when the folder toggle is off but keeps memory', as
   ]) {
     expect(names).not.toContain(name);
   }
-  for (const name of ['save_session_memory', 'save_global_memory', 'manage_schedule']) {
+  for (const name of [
+    'save_session_memory',
+    'save_global_memory',
+    'manage_schedule',
+  ]) {
     expect(names).toContain(name);
   }
 });

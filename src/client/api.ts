@@ -44,3 +44,6 @@ export async function api<T>(
 export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
+export function getToken(): string {
+  return token;
+}

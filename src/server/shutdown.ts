@@ -1,6 +1,7 @@
 export function createShutdown(options: {
   stopRunner: () => void;
   stopPlatform: () => Promise<void>;
+  stopVoice?: () => void;
   closeServer: () => Promise<void>;
   exit: (code: number) => void;
   report: (operation: string, error: unknown) => void;
@@ -18,6 +19,11 @@ export function createShutdown(options: {
         options.stopRunner();
       } catch (error) {
         report('Stopping scheduler failed', error);
+      }
+      try {
+        options.stopVoice?.();
+      } catch (error) {
+        report('Stopping voice calls failed', error);
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<void>((resolve) => {

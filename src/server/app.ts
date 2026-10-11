@@ -9,7 +9,10 @@ import { configured, type Config } from './research.js';
 import type { Platform } from './platform.js';
 import { VoiceService } from './voice.js';
 import { workspaceRoutes } from './workspace-routes.js';
+import { redactSettings, resolveSettingsPatch } from './settings-redaction.js';
 const interval = z.number().int().min(60).max(31_536_000).nullable();
+/** The Hono app with an extra handle for shutdown-time voice-call cleanup. */
+export type App = Hono & { voiceService: VoiceService | undefined };
 export interface AppOptions {
   store: Store;
   runner: Runner;
@@ -17,6 +20,8 @@ export interface AppOptions {
   ownerToken?: string;
   origin?: string;
   platform?: Platform;
+  /** Extra connect-src origins allowed by the CSP (e.g. the Intelligence WS origin). */
+  connectOrigins?: string[];
 }
 export function createApp({
   store,
@@ -25,8 +30,9 @@ export function createApp({
   ownerToken,
   origin,
   platform,
-}: AppOptions) {
-  const app = new Hono();
+  connectOrigins = [],
+}: AppOptions): App {
+  const app = new Hono() as App;
   app.use(
     '/api/*',
     bodyLimit({
@@ -37,6 +43,11 @@ export function createApp({
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
     c.header('X-Content-Type-Options', 'nosniff');
+    c.header('Referrer-Policy', 'no-referrer');
+    c.header(
+      'Content-Security-Policy',
+      `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${connectOrigins.join(' ')}; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
+    );
     const requestUrl = new URL(c.req.url);
     const allowedHosts = new Set([
       'localhost',
@@ -78,7 +89,7 @@ export function createApp({
   if (platform && voice) app.route('/api', workspaceRoutes(platform, voice));
   app.get('/api/state', (c) =>
     c.json({
-      settings: store.settings(),
+      settings: redactSettings(store.settings()),
       tasks: store.tasks(),
       memories: store.memories(),
       mode: config.mode,
@@ -179,19 +190,12 @@ export function createApp({
         memoryAllowed: z.boolean().optional(),
         model: z.string().trim().max(120).nullable().optional(),
         reasoningEffort: z.string().trim().max(50).nullable().optional(),
-        computerEnvironment: z.string().trim().max(50).nullable().optional(),
         voiceProvider: z.string().trim().max(50).nullable().optional(),
         voiceModel: z.string().trim().max(100).nullable().optional(),
         voiceName: z.string().trim().max(50).nullable().optional(),
-        voiceTelephonyProvider: z.string().trim().max(50).nullable().optional(),
         voiceApiKeys: z.string().max(8192).nullable().optional(),
         telegramBotToken: z.string().trim().max(256).nullable().optional(),
         telegramAllowedUsers: z.string().trim().max(512).nullable().optional(),
-        whatsappPhoneNumberId: z.string().trim().max(100).nullable().optional(),
-        whatsappAccessToken: z.string().trim().max(1024).nullable().optional(),
-        whatsappVerifyToken: z.string().trim().max(256).nullable().optional(),
-        twilioAccountSid: z.string().trim().max(100).nullable().optional(),
-        twilioAuthToken: z.string().trim().max(100).nullable().optional(),
         connectors: z.string().max(32768).nullable().optional(),
         codingDirectory: z.string().trim().max(1000).nullable().optional(),
         codingEnabled: z.boolean().optional(),
@@ -202,7 +206,9 @@ export function createApp({
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: 'Invalid settings.' }, 400);
     const previous = store.settings();
-    const settings = store.updateSettings(parsed.data);
+    const settings = store.updateSettings(
+      resolveSettingsPatch(parsed.data, previous),
+    );
     if (
       settings.paused ||
       !settings.researchAllowed ||
@@ -211,7 +217,7 @@ export function createApp({
       runner.abortAll();
     if (settings.paused) voice?.abortAll();
     else void voice?.resumePending();
-    return c.json(settings);
+    return c.json(redactSettings(settings));
   });
   app.get('/api/memories', (c) => {
     const category = c.req.query('category');
@@ -251,7 +257,11 @@ export function createApp({
     if (!store.memories().some((m) => m.id === c.req.param('id')))
       return c.json({ error: 'Memory not found.' }, 404);
     return c.json(
-      store.saveMemory(parsed.data.text, c.req.param('id'), parsed.data.category),
+      store.saveMemory(
+        parsed.data.text,
+        c.req.param('id'),
+        parsed.data.category,
+      ),
     );
   });
   app.delete('/api/memories/:id', (c) =>
@@ -269,5 +279,6 @@ export function createApp({
       500,
     );
   });
+  app.voiceService = voice;
   return app;
 }

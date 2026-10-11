@@ -5,7 +5,13 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { validateLearningSettings } from '../shared/learning.js';
-import type { CallReceipt, Conversation, Dot, SessionMemory, Space } from '../shared/types.js';
+import type {
+  CallReceipt,
+  Conversation,
+  Dot,
+  SessionMemory,
+  Space,
+} from '../shared/types.js';
 export class WorkspaceStore {
   private db: DatabaseSync;
   readonly pages: Pages;
@@ -26,12 +32,16 @@ export class WorkspaceStore {
       CREATE TABLE IF NOT EXISTS local_thread_runs(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, agentId TEXT NOT NULL, parentRunId TEXT, events TEXT NOT NULL, messages TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_local_thread_runs_threadId ON local_thread_runs(threadId, createdAt ASC);
       CREATE TABLE IF NOT EXISTS session_memories(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, text TEXT NOT NULL, category TEXT, createdAt INTEGER NOT NULL);
-      CREATE INDEX IF NOT EXISTS idx_session_memories_threadId ON session_memories(threadId, createdAt DESC);`);
+      CREATE INDEX IF NOT EXISTS idx_session_memories_threadId ON session_memories(threadId, createdAt DESC);
+      CREATE TABLE IF NOT EXISTS usage_events(id INTEGER PRIMARY KEY AUTOINCREMENT, dotId TEXT NOT NULL, tokens INTEGER NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_usage_events_dotId ON usage_events(dotId, createdAt DESC);
+      CREATE TABLE IF NOT EXISTS telegram_threads(chatId INTEGER PRIMARY KEY, threadId TEXT NOT NULL);`);
     for (const [table, column, definition] of [
       ['dots', 'learningContainerId', 'TEXT'],
       ['dots', 'skillDeliveryEnabled', 'INTEGER NOT NULL DEFAULT 0'],
       ['dots', 'model', 'TEXT'],
       ['dots', 'reasoningEffort', 'TEXT'],
+      ['dots', 'budgetTokens', 'INTEGER'],
       ['thread_bindings', 'learningContainerId', 'TEXT'],
     ]) {
       if (
@@ -131,6 +141,7 @@ export class WorkspaceStore {
     skillDeliveryEnabled = false,
     model: string | null = null,
     reasoningEffort: string | null = null,
+    budgetTokens: number | null = null,
   ): Dot {
     this.validateSpaceAccess(spaceId, spaceIds);
     validateLearningSettings(learningContainerId, skillDeliveryEnabled);
@@ -146,13 +157,14 @@ export class WorkspaceStore {
       skillDeliveryEnabled,
       model,
       reasoningEffort,
+      budgetTokens,
       createdAt: Date.now(),
     };
     this.db.exec('BEGIN');
     try {
       this.db
         .prepare(
-          'INSERT INTO dots (id, spaceId, name, instructions, researchAllowed, memoryAllowed, createdAt, learningContainerId, skillDeliveryEnabled, model, reasoningEffort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO dots (id, spaceId, name, instructions, researchAllowed, memoryAllowed, createdAt, learningContainerId, skillDeliveryEnabled, model, reasoningEffort, budgetTokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
         .run(
           dot.id,
@@ -166,6 +178,7 @@ export class WorkspaceStore {
           +skillDeliveryEnabled,
           model,
           reasoningEffort,
+          budgetTokens,
         );
       for (const id of dot.spaceIds)
         this.db.prepare('INSERT INTO dot_spaces VALUES (?, ?)').run(dot.id, id);
@@ -200,6 +213,7 @@ export class WorkspaceStore {
       skillDeliveryEnabled?: boolean;
       model?: string | null;
       reasoningEffort?: string | null;
+      budgetTokens?: number | null;
     },
   ): Dot {
     const current = this.dot(id);
@@ -213,17 +227,24 @@ export class WorkspaceStore {
         : patch.learningContainerId;
     const skillDeliveryEnabled =
       patch.skillDeliveryEnabled ?? current.skillDeliveryEnabled ?? false;
-    const model = patch.model === undefined ? (current.model ?? null) : patch.model;
+    const model =
+      patch.model === undefined ? (current.model ?? null) : patch.model;
     const reasoningEffort =
       patch.reasoningEffort === undefined
         ? (current.reasoningEffort ?? null)
         : patch.reasoningEffort;
+    const budgetTokens =
+      patch.budgetTokens === undefined
+        ? (current.budgetTokens ?? null)
+        : patch.budgetTokens === null || patch.budgetTokens <= 0
+          ? null
+          : Math.floor(patch.budgetTokens);
     validateLearningSettings(learningContainerId, skillDeliveryEnabled);
     this.db.exec('BEGIN');
     try {
       this.db
         .prepare(
-          'UPDATE dots SET name=?, instructions=?, researchAllowed=?, memoryAllowed=?, learningContainerId=?, skillDeliveryEnabled=?, model=?, reasoningEffort=? WHERE id=?',
+          'UPDATE dots SET name=?, instructions=?, researchAllowed=?, memoryAllowed=?, learningContainerId=?, skillDeliveryEnabled=?, model=?, reasoningEffort=?, budgetTokens=? WHERE id=?',
         )
         .run(
           patch.name,
@@ -234,6 +255,7 @@ export class WorkspaceStore {
           +skillDeliveryEnabled,
           model,
           reasoningEffort,
+          budgetTokens,
           id,
         );
       this.db
@@ -298,36 +320,64 @@ export class WorkspaceStore {
     this.db
       .prepare('DELETE FROM thread_bindings WHERE id=? AND ownerId=?')
       .run(id, this.ownerId);
+    this.db.prepare('DELETE FROM local_thread_runs WHERE threadId=?').run(id);
+    this.db.prepare('DELETE FROM calls WHERE threadId=?').run(id);
+    this.db.prepare('DELETE FROM captures WHERE threadId=?').run(id);
+    this.db.prepare('DELETE FROM task_threads WHERE threadId=?').run(id);
+    this.db.prepare('DELETE FROM page_threads WHERE threadId=?').run(id);
+    this.db.prepare('DELETE FROM page_reviews WHERE threadId=?').run(id);
+    this.db.prepare('DELETE FROM session_memories WHERE threadId=?').run(id);
+    this.db.prepare('DELETE FROM telegram_threads WHERE threadId=?').run(id);
+  }
+  /** Estimated tokens spent by a Dot this calendar month (budget accounting). */
+  recordUsage(dotId: string, tokens: number) {
+    if (!Number.isFinite(tokens) || tokens <= 0) return;
     this.db
-      .prepare('DELETE FROM local_thread_runs WHERE threadId=?')
-      .run(id);
+      .prepare(
+        'INSERT INTO usage_events (dotId, tokens, createdAt) VALUES (?, ?, ?)',
+      )
+      .run(dotId, Math.ceil(tokens), Date.now());
+  }
+  monthlyUsage(dotId: string): number {
+    const start = new Date();
+    start.setUTCDate(1);
+    start.setUTCHours(0, 0, 0, 0);
+    const row = this.db
+      .prepare(
+        'SELECT SUM(tokens) AS total FROM usage_events WHERE dotId=? AND createdAt>=?',
+      )
+      .get(dotId, start.getTime()) as { total: number | null };
+    return row.total ?? 0;
+  }
+  resetUsage(dotId: string) {
+    this.db.prepare('DELETE FROM usage_events WHERE dotId=?').run(dotId);
+  }
+  /** Durable Telegram chat -> conversation binding (survives restarts). */
+  telegramThread(chatId: number): string | undefined {
+    const row = this.db
+      .prepare('SELECT threadId FROM telegram_threads WHERE chatId=?')
+      .get(chatId) as { threadId: string } | undefined;
+    return row?.threadId;
+  }
+  bindTelegramThread(chatId: number, threadId: string) {
     this.db
-      .prepare('DELETE FROM calls WHERE threadId=?')
-      .run(id);
-    this.db
-      .prepare('DELETE FROM captures WHERE threadId=?')
-      .run(id);
-    this.db
-      .prepare('DELETE FROM task_threads WHERE threadId=?')
-      .run(id);
-    this.db
-      .prepare('DELETE FROM page_threads WHERE threadId=?')
-      .run(id);
-    this.db
-      .prepare('DELETE FROM page_reviews WHERE threadId=?')
-      .run(id);
-    this.db
-      .prepare('DELETE FROM session_memories WHERE threadId=?')
-      .run(id);
+      .prepare(
+        'INSERT INTO telegram_threads (chatId, threadId) VALUES (?, ?) ON CONFLICT(chatId) DO UPDATE SET threadId=excluded.threadId',
+      )
+      .run(chatId, threadId);
   }
   sessionMemories(threadId: string, category?: string): SessionMemory[] {
     if (category) {
       return this.db
-        .prepare('SELECT * FROM session_memories WHERE threadId=? AND category=? ORDER BY createdAt DESC')
+        .prepare(
+          'SELECT * FROM session_memories WHERE threadId=? AND category=? ORDER BY createdAt DESC',
+        )
         .all(threadId, category) as unknown as SessionMemory[];
     }
     return this.db
-      .prepare('SELECT * FROM session_memories WHERE threadId=? ORDER BY createdAt DESC')
+      .prepare(
+        'SELECT * FROM session_memories WHERE threadId=? ORDER BY createdAt DESC',
+      )
       .all(threadId) as unknown as SessionMemory[];
   }
   saveSessionMemory(
@@ -348,11 +398,16 @@ export class WorkspaceStore {
       .get(id) as unknown as SessionMemory;
   }
   deleteSessionMemory(id: string): boolean {
-    return this.db.prepare('DELETE FROM session_memories WHERE id=?').run(id).changes > 0;
+    return (
+      this.db.prepare('DELETE FROM session_memories WHERE id=?').run(id)
+        .changes > 0
+    );
   }
   clearSessionMemories(threadId: string): number {
     return Number(
-      this.db.prepare('DELETE FROM session_memories WHERE threadId=?').run(threadId).changes,
+      this.db
+        .prepare('DELETE FROM session_memories WHERE threadId=?')
+        .run(threadId).changes,
     );
   }
   clearThreadMessages(id: string): void {
@@ -360,10 +415,14 @@ export class WorkspaceStore {
     this.db.prepare('DELETE FROM local_thread_runs WHERE threadId=?').run(id);
     this.db.prepare('DELETE FROM captures WHERE threadId=?').run(id);
   }
-  compactThreadMessages(id: string): { originalRuns: number; compacted: boolean } {
+  compactThreadMessages(id: string): {
+    originalRuns: number;
+    compacted: boolean;
+  } {
     this.requireThread(id);
     const runs = this.threadRuns(id);
-    if (runs.length <= 1) return { originalRuns: runs.length, compacted: false };
+    if (runs.length <= 1)
+      return { originalRuns: runs.length, compacted: false };
 
     const allMessages: Array<{ role: string; content: string }> = [];
     for (const run of runs) {
@@ -372,11 +431,16 @@ export class WorkspaceStore {
         if (Array.isArray(msgs)) {
           for (const m of msgs) {
             if (m.content && typeof m.content === 'string') {
-              allMessages.push({ role: m.role || 'user', content: m.content.slice(0, 400) });
+              allMessages.push({
+                role: m.role || 'user',
+                content: m.content.slice(0, 400),
+              });
             }
           }
         }
-      } catch {}
+      } catch {
+        /* malformed messages JSON — skip this run */
+      }
     }
 
     const summaryText = allMessages
@@ -406,9 +470,7 @@ export class WorkspaceStore {
     return { originalRuns: runs.length, compacted: true };
   }
   unbindTask(taskId: string): void {
-    this.db
-      .prepare('DELETE FROM task_threads WHERE taskId=?')
-      .run(taskId);
+    this.db.prepare('DELETE FROM task_threads WHERE taskId=?').run(taskId);
   }
   saveThreadRun(run: {
     id: string;
@@ -422,7 +484,7 @@ export class WorkspaceStore {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO local_thread_runs (id, threadId, agentId, parentRunId, events, messages, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -431,7 +493,7 @@ export class WorkspaceStore {
         run.parentRunId,
         run.events,
         run.messages,
-        run.createdAt
+        run.createdAt,
       );
   }
   threadRuns(threadId?: string): Array<{
@@ -445,17 +507,17 @@ export class WorkspaceStore {
   }> {
     return this.db
       .prepare(
-        `SELECT * FROM local_thread_runs ${threadId ? 'WHERE threadId=?' : ''} ORDER BY createdAt ASC`
+        `SELECT * FROM local_thread_runs ${threadId ? 'WHERE threadId=?' : ''} ORDER BY createdAt ASC`,
       )
       .all(...(threadId ? [threadId] : [])) as unknown as Array<{
-        id: string;
-        threadId: string;
-        agentId: string;
-        parentRunId: string | null;
-        events: string;
-        messages: string;
-        createdAt: number;
-      }>;
+      id: string;
+      threadId: string;
+      agentId: string;
+      parentRunId: string | null;
+      events: string;
+      messages: string;
+      createdAt: number;
+    }>;
   }
   bindTask(taskId: string, threadId: string) {
     this.requireThread(threadId);

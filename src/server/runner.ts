@@ -53,9 +53,9 @@ export class Runner {
     const timeout = setTimeout(
       () =>
         controller.abort(
-          new Error('Research exceeded the 90 second time limit.'),
+          new Error('Research exceeded the 10-minute time limit.'),
         ),
-      90_000,
+      600_000,
     );
     try {
       const settings = this.store.settings();

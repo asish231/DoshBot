@@ -9,6 +9,7 @@ import {
   type CopilotHonoApp,
 } from '@copilotkit/runtime/v2';
 import { PersistentLocalRunner } from './local-runner.js';
+import type { AbstractAgent } from '@ag-ui/client';
 import { createSlackChannel } from './slack-channel.js';
 export { slackIdentity } from './slack-channel.js';
 import { Store } from './store.js';
@@ -69,10 +70,7 @@ export class Platform {
           }
           return { id: input.threadId };
         },
-        async getThreadMessages(input: {
-          threadId: string;
-          userId: string;
-        }) {
+        async getThreadMessages(input: { threadId: string; userId: string }) {
           if (localRunner) {
             const msgs = localRunner.getThreadMessages(input.threadId);
             return {
@@ -112,7 +110,7 @@ export class Platform {
             id: workspace.ownerId,
             name: 'OpenDots owner',
           }),
-          agents: async () =>
+          agents: async (): Promise<Record<string, AbstractAgent>> =>
             Object.fromEntries(
               workspace
                 .dots()
@@ -127,7 +125,7 @@ export class Platform {
       : this.runner
         ? new CopilotRuntime({
             runner: this.runner,
-            agents: async () =>
+            agents: async (): Promise<Record<string, AbstractAgent>> =>
               Object.fromEntries(
                 workspace
                   .dots()
@@ -161,13 +159,8 @@ export class Platform {
     } catch {
       /* ignore */
     }
-    const isBrowserVoice = settings.voiceProvider === 'browser';
-    const keyReady = !!(this.config.voiceKey || hasDbKeys || isBrowserVoice);
-    const modelReady = !!(
-      this.config.voiceModel ||
-      settings.voiceModel ||
-      isBrowserVoice
-    );
+    const keyReady = !!(this.config.voiceKey || hasDbKeys);
+    const modelReady = !!(this.config.voiceModel || settings.voiceModel);
     status.voice = keyReady && modelReady && !status.missing.length;
     return status;
   }
@@ -259,15 +252,24 @@ export class Platform {
       );
     }
     const url = new URL(request.url);
-    const threadMatch = url.pathname.match(/^\/api\/copilotkit\/threads\/([^/]+)$/);
+    const threadMatch = url.pathname.match(
+      /^\/api\/copilotkit\/threads\/([^/]+)$/,
+    );
     if (threadMatch && this.runner) {
       const threadId = decodeURIComponent(threadMatch[1]);
       if (request.method === 'PATCH') {
-        const data = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+        const data = (body && typeof body === 'object' ? body : {}) as Record<
+          string,
+          unknown
+        >;
         if (typeof data.name === 'string') {
           this.workspace.updateThread(threadId, { title: data.name });
         }
-        return Response.json({ id: threadId, name: data.name, archived: false });
+        return Response.json({
+          id: threadId,
+          name: data.name,
+          archived: false,
+        });
       }
       if (request.method === 'DELETE') {
         this.workspace.deleteThread(threadId);
