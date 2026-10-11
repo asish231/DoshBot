@@ -6827,3 +6827,118 @@ copilotkit-web-inspector,
 [data-theme='dark'] .recent-chat-item:hover {
   background: #26262f;
 }
+
+/* ==========================================================================
+   Dark theme — DEFINITIVE sidebar fix (correct class names, full coverage)
+   ========================================================================== */
+[data-theme='dark'] .sidebar,
+[data-theme='dark'] .sidebar-bottom,
+[data-theme='dark'] .icon-rail,
+[data-theme='dark'] .template-app .sidebar,
+[data-theme='dark'] .template-app .icon-rail {
+  background: #131318 !important;
+  border-color: #26262f !important;
+  color: #c9cbd4 !important;
+}
+[data-theme='dark'] .sidebar .nav-item,
+[data-theme='dark'] .sidebar .dot-nav,
+[data-theme='dark'] .sidebar .nav-label,
+[data-theme='dark'] .sidebar .thread-row,
+[data-theme='dark'] .sidebar .thread-summary,
+[data-theme='dark'] .sidebar .thread-summary span,
+[data-theme='dark'] .sidebar .thread-summary small,
+[data-theme='dark'] .sidebar .thread-main-btn,
+[data-theme='dark'] .sidebar .recent,
+[data-theme='dark'] .sidebar-empty {
+  color: #c9cbd4 !important;
+}
+[data-theme='dark'] .sidebar .thread-row:hover,
+[data-theme='dark'] .sidebar .thread-row:hover .thread-summary span,
+[data-theme='dark'] .sidebar .thread-row:hover .thread-summary small {
+  background: transparent;
+  color: #e8e9ee;
+}
+[data-theme='dark'] .sidebar .nav-item:hover,
+[data-theme='dark'] .sidebar .thread-row .nav-item:hover {
+  background: #22222b !important;
+  color: #e8e9ee !important;
+}
+[data-theme='dark'] .sidebar .thread-list,
+[data-theme='dark'] .sidebar .recent {
+  border-color: #26262f !important;
+}
+[data-theme='dark'] .sidebar .nav-item.active {
+  background: #1d1d24 !important;
+  color: #e8e9ee !important;
+}
+[data-theme='dark'] .sidebar .wordmark,
+[data-theme='dark'] .template-app .sidebar .wordmark {
+  color: #e8e9ee !important;
+}
+[data-theme='dark'] .sidebar .sidebar-empty {
+  color: #6f7280 !important;
+}
+[data-theme='dark'] .sidebar-bottom {
+  background: #131318 !important;
+  border-top: 1px solid #26262f !important;
+}
+[data-theme='dark'] .sidebar-bottom .nav-item {
+  color: #9a9ba6 !important;
+}
+[data-theme='dark'] .sidebar-bottom .nav-item:hover {
+  background: #22222b !important;
+  color: #e8e9ee !important;
+}
+[data-theme='dark'] .thread-row .thread-main-btn {
+  background: transparent !important;
+}
+[data-theme='dark'] .thread-row:hover {
+  background: transparent !important;
+}
+[data-theme='dark'] .sidebar .thread-row .nav-item:hover,
+[data-theme='dark'] .sidebar .thread-row.nav-item:hover,
+[data-theme='dark'] .sidebar .thread-list .nav-item:hover {
+  background: #22222b !important;
+  border-radius: 7px;
+}
+[data-theme='dark'] .sidebar .thread-row {
+  background: transparent !important;
+}
+[data-theme='dark'] .sidebar .thread-row .thread-summary span {
+  color: #c9cbd4 !important;
+}
+[data-theme='dark'] .sidebar .thread-row .thread-summary small {
+  color: #6f7280 !important;
+}
+[data-theme='dark'] .sidebar .nav-item .thread-summary span {
+  color: #9a9ba6;
+}
+[data-theme='dark'] .nav-item:hover .thread-summary span,
+[data-theme='dark'] .sidebar .nav-item:hover .thread-summary span {
+  color: #e8e9ee !important;
+}
+[data-theme='dark'] .thread-context-menu {
+  background: #1d1d24 !important;
+  border: 1px solid #3a3a46 !important;
+}
+[data-theme='dark'] .thread-context-menu button {
+  background: #1d1d24 !important;
+  border: 1px solid #3a3a46 !important;
+  color: #e8e9ee !important;
+}
+[data-theme='dark'] .thread-context-menu button:hover {
+  background: #26262f !important;
+}
+[data-theme='dark'] .thread-delete-btn {
+  background: transparent !important;
+  color: #9ea2b4 !important;
+}
+[data-theme='dark'] .thread-delete-btn:hover {
+  background: #2a1416 !important;
+  color: #ff8080 !important;
+}
+[data-theme='dark'] .thread-summary input {
+  background: #1d1d24 !important;
+  border: 1px solid #3a3a46 !important;
+  color: #e8e9ee !important;
+}
