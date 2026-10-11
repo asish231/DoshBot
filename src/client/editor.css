@@ -1214,9 +1214,15 @@
 .template-app .sidebar small {
   color: #64705a;
 }
-.template-app .nav-item small {
+.template-app .sidebar-bottom .nav-item small {
   background: #edf1e7;
   color: #526249;
+}
+.template-app .thread-summary small,
+.template-app .thread-dot-name {
+  background: transparent !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
 }
 .template-app .pause-button,
 .template-app .pause-button > span {
@@ -1277,6 +1283,27 @@
   border-left-color: #3a3a46;
   color: #9a9ba6;
 }
+[data-theme='dark'] .document-prose table {
+  border-color: #26262f;
+}
+[data-theme='dark'] .document-prose td,
+[data-theme='dark'] .document-prose th {
+  border-color: #26262f;
+  color: #dfe2de;
+}
+[data-theme='dark'] .document-prose th {
+  background: #1d1d24;
+  color: #e8e9ee;
+}
+[data-theme='dark'] .document-prose tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.03);
+}
+[data-theme='dark'] .document-prose tr:hover td {
+  background: rgba(255, 255, 255, 0.06);
+}
+[data-theme='dark'] .document-prose .selectedCell:after {
+  background: rgba(169, 198, 255, 0.15);
+}
 [data-theme='dark'] .autosave-status {
   color: #9a9ba6;
 }
@@ -1289,4 +1316,17 @@
   background: #2a1416;
   border-color: #7a2c33;
   color: #ffb3b8;
+}
+[data-theme='dark'] .sidebar-bottom .nav-item small {
+  background: #22222b;
+  color: #9a9ba6;
+}
+[data-theme='dark'] .thread-summary small,
+[data-theme='dark'] .thread-dot-name,
+[data-theme='dark'] .template-app .thread-summary small,
+[data-theme='dark'] .template-app .thread-dot-name {
+  background: transparent !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  color: #6f7280 !important;
 }

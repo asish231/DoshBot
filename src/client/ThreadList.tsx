@@ -160,7 +160,7 @@ export function ThreadList({
                 ) : (
                   <span>{title}</span>
                 )}
-                <small>
+                <small className="thread-dot-name">
                   {dots.find((dot) => dot.id === thread.dotId)?.name}
                 </small>
               </span>
