@@ -793,6 +793,12 @@ export function Chat({
   const [liveThinking, setLiveThinking] = useState('');
   const [finishedThinking, setFinishedThinking] = useState('');
   const [thinkingOpen, setThinkingOpen] = useState(false);
+  const thinkingBodyRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    if (liveThinking && thinkingOpen && thinkingBodyRef.current)
+      thinkingBodyRef.current.scrollTop = thinkingBodyRef.current.scrollHeight;
+  }, [liveThinking, thinkingOpen]);
   useEffect(() => {
     if (
       !autoCallStarted.current &&
@@ -1263,7 +1269,7 @@ export function Chat({
               </span>
             </button>
             {thinkingOpen && (
-              <pre className="thinking-body" aria-live="polite">
+              <pre className="thinking-body" aria-live="polite" ref={thinkingBodyRef}>
                 {liveThinking || finishedThinking}
               </pre>
             )}

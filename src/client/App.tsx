@@ -30,6 +30,8 @@ import {
   Lightbulb,
   FileText,
   CalendarClock,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 function formatModelName(model: string): string {
@@ -107,6 +109,30 @@ export function App() {
   const [view, rawSetView] = useState<'chat' | 'tasks' | 'memories' | 'space'>(
     'chat',
   );
+  // Light/dark theme: persisted choice, OS preference as the default.
+  // The boot script in index.html sets the same value pre-paint (no flash).
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const stored = localStorage.getItem('opendots-theme');
+      if (stored === 'light' || stored === 'dark') return stored;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
+    } catch {
+      return 'light';
+    }
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem('opendots-theme', theme);
+    } catch {
+      /* storage unavailable — theme still applies for this session */
+    }
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', theme === 'dark' ? '#0f0f13' : '#ffffff');
+  }, [theme]);
   const dirtyPage = useRef(false);
   const [spaceId, setSpaceId] = useState('');
   const [pageId, setPageId] = useState<string>();
@@ -749,6 +775,22 @@ export function App() {
             <span className="mode-badge">
               {configured ? 'SELF-HOSTED' : 'SETUP REQUIRED'}
             </span>
+            <button
+              className="icon-button"
+              aria-label={
+                theme === 'dark'
+                  ? 'Switch to light mode'
+                  : 'Switch to dark mode'
+              }
+              title={
+                theme === 'dark'
+                  ? 'Switch to light mode'
+                  : 'Switch to dark mode'
+              }
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            >
+              {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
             <button
               className="pause-button"
               aria-label={

@@ -1223,3 +1223,70 @@
   color: #53624d;
   font-size: 11px;
 }
+
+/* ==========================================================================
+   Dark theme — Spaces/pages document surfaces
+   ========================================================================== */
+[data-theme='dark'] {
+  --document-ink: #dfe2de;
+  --document-muted: #9a9ba6;
+  --document-line: #3a3a46;
+}
+[data-theme='dark'] .document-primary {
+  background: #35766f;
+  border-color: #35766f;
+  color: #ffffff;
+}
+[data-theme='dark'] .library-search input {
+  background: #17171d !important;
+  border-color: #3a3a46 !important;
+  color: #e8e9ee !important;
+}
+[data-theme='dark'] .page-card,
+[data-theme='dark'] .library-card {
+  background: #17171d;
+  border-color: #3a3a46;
+  color: #d9dbe3;
+}
+[data-theme='dark'] .page-card:hover {
+  background: #1d1d24;
+}
+[data-theme='dark'] .document-shell,
+[data-theme='dark'] .page-document,
+[data-theme='dark'] .document-canvas {
+  background: #0f0f13;
+  color: #dfe2de;
+}
+[data-theme='dark'] .document-toolbar,
+[data-theme='dark'] .page-toolbar {
+  background: #131318;
+  border-color: #26262f;
+  color: #c9cbd4;
+}
+[data-theme='dark'] .ProseMirror,
+[data-theme='dark'] .document-editor .ProseMirror {
+  color: #dfe2de;
+  caret-color: #a9c6ff;
+}
+[data-theme='dark'] .ProseMirror pre,
+[data-theme='dark'] .document-editor code {
+  background: #1d1d24;
+  color: #cfd3dd;
+}
+[data-theme='dark'] .document-editor .ProseMirror blockquote {
+  border-left-color: #3a3a46;
+  color: #9a9ba6;
+}
+[data-theme='dark'] .autosave-status {
+  color: #9a9ba6;
+}
+[data-theme='dark'] .save-notice {
+  background: #2a2a1a;
+  border-color: #6b5a2a;
+  color: #e8d9a8;
+}
+[data-theme='dark'] .conflict-notice {
+  background: #2a1416;
+  border-color: #7a2c33;
+  color: #ffb3b8;
+}

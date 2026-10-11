@@ -28,15 +28,16 @@ export class ErrorBoundary extends Component<Props, State> {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: '#fff',
+            background: 'var(--surface, #fff)',
+            color: 'var(--ink, #000)',
             padding: '24px',
           }}
         >
           <div
             style={{
               maxWidth: 460,
-              border: '2px solid #000',
-              background: '#fff',
+              border: '2px solid var(--line, #000)',
+              background: 'var(--surface, #fff)',
               padding: '24px',
             }}
           >
@@ -45,7 +46,7 @@ export class ErrorBoundary extends Component<Props, State> {
               style={{
                 margin: '0 0 12px',
                 fontSize: 13,
-                color: '#555',
+                color: 'var(--muted, #555)',
                 lineHeight: 1.5,
               }}
             >
