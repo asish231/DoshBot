@@ -6655,3 +6655,175 @@ copilotkit-web-inspector,
 [data-theme='dark'] .folder-connect-card:hover {
   background: #1d1d24 !important;
 }
+
+/* ==========================================================================
+   Dark theme — final sweep: sidebar items, pills, identity card, all panels
+   Everything dark when dark mode is on — no exceptions.
+   ========================================================================== */
+[data-theme='dark'] .template-app,
+[data-theme='dark'] .sidebar,
+[data-theme='dark'] .sidebar-inner,
+[data-theme='dark'] .chat-workspace,
+[data-theme='dark'] .chat-column,
+[data-theme='dark'] .new-conversation,
+[data-theme='dark'] .live-chat,
+[data-theme='dark'] .chat-transcript,
+[data-theme='dark'] .chat-composer,
+[data-theme='dark'] .chat-persona,
+[data-theme='dark'] .topbar,
+[data-theme='dark'] .template-app .topbar {
+  background: #0f0f13;
+  color: #e8e9ee;
+}
+[data-theme='dark'] .nav-item,
+[data-theme='dark'] .dot-nav,
+[data-theme='dark'] .space-title,
+[data-theme='dark'] .thread-item,
+[data-theme='dark'] .sidebar-empty {
+  color: #c9cbd4;
+}
+[data-theme='dark'] .thread-list .nav-item,
+[data-theme='dark'] .thread-list .nav-item > span {
+  color: #c9cbd4;
+}
+[data-theme='dark'] .thread-list .nav-item:hover {
+  background: #22222b;
+}
+[data-theme='dark'] .thread-list .nav-item.active,
+[data-theme='dark'] .thread-list .nav-item:hover.active {
+  background: #1d1d24;
+}
+[data-theme='dark'] .dot-nav.active {
+  background: #1d1d24;
+  color: #e8e9ee;
+}
+[data-theme='dark'] .hero-badge,
+[data-theme='dark'] .mode-badge {
+  background: #1d1d24;
+  color: #9a9ba6;
+  border-color: #3a3a46;
+}
+[data-theme='dark'] .hero-actions,
+[data-theme='dark'] .hero-actions button,
+[data-theme='dark'] .hero-btn,
+[data-theme='dark'] .hero-btn.primary-hero {
+  background: #1d1d24;
+}
+[data-theme='dark'] .hero-actions button {
+  color: #e8e9ee;
+}
+[data-theme='dark'] .hero-btn,
+[data-theme='dark'] .hero-btn:hover {
+  border-color: #3a3a46 !important;
+}
+[data-theme='dark'] .hero-badge::selection {
+  background: #1d1d24;
+}
+[data-theme='dark'] .nav-item:hover svg,
+[data-theme='dark'] .dot-nav:hover svg {
+  color: #e8e9ee;
+}
+[data-theme='dark'] .line-option-row,
+[data-theme='dark'] .line-option-row:hover {
+  background: #1d1d24;
+}
+[data-theme='dark'] .line-option-title,
+[data-theme='dark'] .line-option-desc {
+  color: #9a9ba6;
+}
+[data-theme='dark'] .line-option-title:hover {
+  color: #e8e9ee;
+}
+[data-theme='dark'] .empty-chat-persona h2,
+[data-theme='dark'] .empty-chat-persona p,
+[data-theme='dark'] .chat-welcome h1,
+[data-theme='dark'] .chat-welcome p {
+  color: #9a9ba6;
+}
+[data-theme='dark'] .empty-chat-persona h2 {
+  color: #e8e9ee;
+}
+[data-theme='dark'] .thinking-panel .thinking-header {
+  background: #1d1d24;
+  color: #e8e9ee;
+}
+[data-theme='dark'] .thinking-panel .thinking-header:hover {
+  background: #26262f;
+}
+[data-theme='dark'] .hero-badge {
+  border: 1px solid #3a3a46;
+}
+[data-theme='dark'] .folder-icon {
+  background: #26262f;
+  color: #a9c6ff;
+}
+[data-theme='dark'] .folder-cta {
+  color: #a9c6ff;
+}
+[data-theme='dark'] .folder-cta:hover {
+  background: #30303b;
+}
+[data-theme='dark'] .sidebar-empty {
+  color: #6f7280;
+}
+[data-theme='dark'] .sidebar-error {
+  color: #b59286;
+}
+[data-theme='dark'] .empty-activity {
+  color: #9a9ba6;
+}
+[data-theme='dark'] .search-box input {
+  background: #1d1d24;
+  border-color: #3a3a46;
+  color: #e8e9ee;
+}
+[data-theme='dark'] .search-box input:focus {
+  border-color: #a9c6ff;
+}
+[data-theme='dark'] .composer input,
+[data-theme='dark'] .composer textarea {
+  background: #1d1d24;
+}
+[data-theme='dark'] .chat-persona-actions button,
+[data-theme='dark'] .chat-persona-actions > span > button {
+  color: #c9cbd4;
+}
+[data-theme='dark'] .memory-category-badge,
+[data-theme='dark'] .attach-chip,
+[data-theme='dark'] .attach-preview-row {
+  background: #1d1d24;
+}
+[data-theme='dark'] .attach-chip {
+  border-color: #3a3a46;
+  color: #e8e9ee;
+}
+[data-theme='dark'] .composer-send-btn {
+  background: #e8e9ee;
+  color: #0f0f13;
+}
+[data-theme='dark'] .composer-send-btn:hover {
+  background: #f2f3f7;
+}
+[data-theme='dark'] .icon-rail {
+  background: #131318;
+  border-right: 1px solid #26262f;
+}
+[data-theme='dark'] .icon-rail button {
+  color: #9a9ba6;
+}
+[data-theme='dark'] .icon-rail button:hover {
+  background: #22222b;
+  color: #e8e9ee;
+}
+[data-theme='dark'] .wordmark {
+  color: #e8e9ee;
+}
+[data-theme='dark'] .wordmark strong {
+  color: #e8e9ee;
+}
+[data-theme='dark'] .recent-chat-item {
+  background: #1d1d24;
+}
+[data-theme='dark'] .recent-chat-item:hover {
+  background: #26262f;
+}
