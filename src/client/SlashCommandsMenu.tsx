@@ -138,6 +138,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     immediate: true,
   },
   {
+    id: 'skills',
+    command: '/skills',
+    name: 'Skill Library',
+    description:
+      'Open the skills library — add, view, edit, or remove agent skills',
+    category: 'tools',
+    immediate: true,
+  },
+  {
     id: 'model',
     command: '/model',
     name: 'Switch Model',

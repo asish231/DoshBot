@@ -496,6 +496,12 @@ export function Chat({
       } else {
         void send('/mcp');
       }
+    } else if (cmd.id === 'skills') {
+      if (onOpenSettings) {
+        onOpenSettings('skills');
+      } else {
+        void send('/skills');
+      }
     } else if (cmd.id === 'model') {
       if (onOpenSettings) {
         onOpenSettings('models');
@@ -962,7 +968,17 @@ export function Chat({
       return;
     }
     let outgoing = text;
-    if (trimmed === '/model') {
+    if (trimmed === '/skills') {
+      setDraft('');
+      if (onOpenSettings) {
+        onOpenSettings('skills');
+        setCompactMessage('Opening the skill library…');
+        setTimeout(() => setCompactMessage(null), 3000);
+        return;
+      }
+      outgoing =
+        'List your available skills: call list_skills, then summarize each skill name and description so I can pick one for you to use.';
+    } else if (trimmed === '/model') {
       setDraft('');
       if (onOpenSettings) {
         onOpenSettings('models');
@@ -1077,7 +1093,7 @@ export function Chat({
       const url = trimmed.slice(8).trim();
       outgoing = `Please navigate to ${url} using your computer browser tool and inspect the page content.`;
     } else if (trimmed === '/help') {
-      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /init, /review, /undo, /subagents, /compact, /memory, /model, /tasks, /new, /mcp, /schedule, /search, /browse, /clear) and explain briefly how to use each.`;
+      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /init, /review, /undo, /subagents, /skills, /compact, /memory, /model, /tasks, /new, /mcp, /schedule, /search, /browse, /clear) and explain briefly how to use each.`;
     }
 
     const attachmentContext = buildAttachmentContext();

@@ -12,6 +12,8 @@ import type {
   Task,
   TaskEvent,
 } from '../shared/types.js';
+import { SkillsStore } from './skills-store.js';
+import { fuzzyRank } from './fuzzy.js';
 
 export type Claim = Task & { lease: string };
 const defaults: Settings = {
@@ -25,15 +27,21 @@ const defaults: Settings = {
 };
 export class Store {
   private db: DatabaseSync;
-  constructor(path: string) {
+  /** Skill library; null only when skills storage is intentionally disabled. */
+  readonly skills: SkillsStore | null;
+  constructor(path: string, options?: { skillsDir?: string }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    this.skills = options?.skillsDir
+      ? new SkillsStore(options.skillsDir)
+      : null;
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, status TEXT NOT NULL, intervalSeconds INTEGER, nextRunAt INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, error TEXT, lease TEXT, leaseUntil INTEGER);
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, taskId TEXT NOT NULL, status TEXT NOT NULL, startedAt INTEGER NOT NULL, finishedAt INTEGER, result TEXT, error TEXT);
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, taskId TEXT NOT NULL, runId TEXT, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS memory_links (fromId TEXT NOT NULL, toId TEXT NOT NULL, relation TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY (fromId, toId));
       CREATE INDEX IF NOT EXISTS tasks_due ON tasks(status, nextRunAt);
       CREATE INDEX IF NOT EXISTS runs_task ON runs(taskId, startedAt);
       CREATE INDEX IF NOT EXISTS events_task ON events(taskId, id);`);
@@ -325,8 +333,88 @@ export class Store {
       .get(id) as unknown as Memory;
   }
   deleteMemory(id: string): boolean {
+    return this.transaction(() => {
+      const deleted =
+        this.db.prepare('DELETE FROM memories WHERE id=?').run(id).changes > 0;
+      if (deleted) {
+        // Cascade: a node leaving the graph takes its edges with it.
+        this.db
+          .prepare('DELETE FROM memory_links WHERE fromId=? OR toId=?')
+          .run(id, id);
+      }
+      return deleted;
+    });
+  }
+  linkMemories(fromId: string, toId: string, relation = 'relates_to') {
+    if (fromId === toId) throw new Error('Cannot link a memory to itself.');
+    const ids = this.db
+      .prepare('SELECT id FROM memories WHERE id IN (?, ?)')
+      .all(fromId, toId) as Array<{ id: string }>;
+    if (ids.length < 2)
+      throw new Error('Both memories must exist before linking.');
+    const now = Date.now();
+    this.db
+      .prepare(
+        'INSERT INTO memory_links (fromId, toId, relation, createdAt) VALUES (?, ?, ?, ?) ON CONFLICT(fromId, toId) DO UPDATE SET relation=excluded.relation',
+      )
+      .run(fromId, toId, relation || 'relates_to', now);
+    return this.memoryLinks(fromId);
+  }
+  unlinkMemories(fromId: string, toId: string): boolean {
     return (
-      this.db.prepare('DELETE FROM memories WHERE id=?').run(id).changes > 0
+      this.db
+        .prepare('DELETE FROM memory_links WHERE fromId=? AND toId=?')
+        .run(fromId, toId).changes > 0
     );
+  }
+  memoryLinks(id: string): Array<{ toId: string; relation: string }> {
+    return this.db
+      .prepare('SELECT toId, relation FROM memory_links WHERE fromId=? ORDER BY createdAt')
+      .all(id) as Array<{ toId: string; relation: string }>;
+  }
+  /** Graph view: category segments with their memories and all edges. */
+  memoryGraph(): {
+    segments: Array<{ category: string; count: number; memoryIds: string[] }>;
+    edges: Array<{ fromId: string; toId: string; relation: string }>;
+    total: number;
+  } {
+    const memories = this.memories();
+    const byCategory = new Map<string, string[]>();
+    for (const memory of memories) {
+      const category = memory.category || 'general';
+      byCategory.set(category, [...(byCategory.get(category) ?? []), memory.id]);
+    }
+    const edges = this.db
+      .prepare('SELECT fromId, toId, relation FROM memory_links ORDER BY createdAt')
+      .all() as Array<{ fromId: string; toId: string; relation: string }>;
+    return {
+      segments: [...byCategory.entries()]
+        .map(([category, memoryIds]) => ({
+          category,
+          count: memoryIds.length,
+          memoryIds,
+        }))
+        .sort((a, b) => b.count - a.count),
+      edges,
+      total: memories.length,
+    };
+  }
+  /** Fuzzy search over global memories, strongest matches first. */
+  searchMemories(query: string, limit = 10) {
+    return fuzzyRank(
+      query,
+      this.memories().map((memory) => ({
+        id: memory.id,
+        text: memory.text,
+        category: memory.category ?? null,
+        createdAt: memory.createdAt,
+      })),
+      limit,
+    ).map((match) => ({
+      ...match.item,
+      score: match.score,
+      strength: match.strength,
+      links: this.memoryLinks(match.item.id),
+    }));
   }
 }

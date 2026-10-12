@@ -10,6 +10,7 @@ import type { Platform } from './platform.js';
 import { VoiceService } from './voice.js';
 import { workspaceRoutes } from './workspace-routes.js';
 import { redactSettings, resolveSettingsPatch } from './settings-redaction.js';
+import { skillInputSchema } from '../shared/skills.js';
 const interval = z.number().int().min(60).max(31_536_000).nullable();
 /** The Hono app with an extra handle for shutdown-time voice-call cleanup. */
 export type App = Hono & { voiceService: VoiceService | undefined };
@@ -269,6 +270,99 @@ export function createApp({
       ? c.json({ ok: true })
       : c.json({ error: 'Memory not found.' }, 404),
   );
+  app.get('/api/memories/graph', (c) => c.json(store.memoryGraph()));
+  app.post('/api/memories/:id/links', async (c) => {
+    const parsed = z
+      .object({
+        toId: z.string().trim().min(1).max(100),
+        relation: z.string().trim().min(1).max(80).optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json({ error: 'Link needs a toId and optional relation.' }, 400);
+    try {
+      return c.json(
+        {
+          fromId: c.req.param('id'),
+          links: store.linkMemories(
+            c.req.param('id'),
+            parsed.data.toId,
+            parsed.data.relation,
+          ),
+        },
+        201,
+      );
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error ? error.message : 'Could not link memories.',
+        },
+        404,
+      );
+    }
+  });
+  app.delete('/api/memories/:id/links/:toId', (c) =>
+    store.unlinkMemories(c.req.param('id'), c.req.param('toId'))
+      ? c.json({ ok: true })
+      : c.json({ error: 'Link not found.' }, 404),
+  );
+  app.get('/api/skills', (c) => {
+    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
+    return c.json(store.skills.list());
+  });
+  app.get('/api/skills/:name', (c) => {
+    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
+    const skill = store.skills.get(c.req.param('name'));
+    return skill ? c.json(skill) : c.json({ error: 'Skill not found.' }, 404);
+  });
+  app.post('/api/skills', async (c) => {
+    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
+    const parsed = skillInputSchema
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json(
+        { error: 'Skill needs a lowercase-hyphen name (1-60), description (1-400), and instructions (1-100000).' },
+        400,
+      );
+    try {
+      return c.json(store.skills.create(parsed.data), 201);
+    } catch (error) {
+      return c.json(
+        { error: error instanceof Error ? error.message : 'Could not create skill.' },
+        409,
+      );
+    }
+  });
+  app.put('/api/skills/:name', async (c) => {
+    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
+    const parsed = z
+      .object({
+        name: skillInputSchema.shape.name.optional(),
+        description: skillInputSchema.shape.description.optional(),
+        instructions: skillInputSchema.shape.instructions.optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success || Object.keys(parsed.data).length === 0)
+      return c.json({ error: 'Provide a name, description, or instructions to update.' }, 400);
+    try {
+      return c.json(store.skills.update(c.req.param('name'), parsed.data));
+    } catch (error) {
+      const status = error instanceof Error && /not found/i.test(error.message) ? 404 : 409;
+      return c.json(
+        { error: error instanceof Error ? error.message : 'Could not update skill.' },
+        status,
+      );
+    }
+  });
+  app.delete('/api/skills/:name', (c) => {
+    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
+    return store.skills.delete(c.req.param('name'))
+      ? c.json({ ok: true })
+      : c.json({ error: 'Skill not found.' }, 404);
+  });
   app.onError((error, c) => {
     console.error('API request failed:', error.name);
     return c.json(

@@ -35,7 +35,9 @@ if (
     'External binding requires an OWNER_TOKEN of at least 24 characters.',
   );
 const database = process.env.DATABASE_PATH ?? 'data/opendots.sqlite';
-const store = new Store(database);
+const store = new Store(database, {
+  skillsDir: process.env.SKILLS_DIR ?? 'data/skills',
+});
 const workspace = new WorkspaceStore(
   database,
   process.env.OWNER_ID ?? 'opendots-owner',

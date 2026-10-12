@@ -16,12 +16,14 @@ import type {
   WorkspaceState,
   Connector,
 } from '../shared/types';
+import type { Skill, SkillSummary } from '../shared/skills';
 import { api } from './api';
 export type SettingsTab =
   | 'setup'
   | 'models'
   | 'coding'
   | 'subagents'
+  | 'skills'
   | 'memory'
   | 'connectors'
   | 'automations'
@@ -596,6 +598,29 @@ export function WorkspaceDialog({
   const [newConnUrl, setNewConnUrl] = useState('');
   const [newConnToken, setNewConnToken] = useState('');
   const [connAddedMessage, setConnAddedMessage] = useState(false);
+
+  // Skills state
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [skillLoaded, setSkillLoaded] = useState(false);
+  const [viewedSkill, setViewedSkill] = useState<Skill | null>(null);
+  const [editingSkill, setEditingSkill] = useState<string | null>(null);
+  const [newSkillName, setNewSkillName] = useState('');
+  const [newSkillDescription, setNewSkillDescription] = useState('');
+  const [newSkillInstructions, setNewSkillInstructions] = useState('');
+  const [skillError, setSkillError] = useState('');
+  useEffect(() => {
+    if (dialog.type !== 'settings' || settingsTab !== 'skills') return;
+    setSkillLoaded(false);
+    void api<SkillSummary[]>('/skills')
+      .then((list) => {
+        setSkills(Array.isArray(list) ? list : []);
+        setSkillLoaded(true);
+      })
+      .catch(() => {
+        setSkills([]);
+        setSkillLoaded(true);
+      });
+  }, [dialog, settingsTab]);
 
   // Automations state
   const [newAutoPrompt, setNewAutoPrompt] = useState('');
@@ -1292,6 +1317,15 @@ export function WorkspaceDialog({
                   onClick={() => setSettingsTab('subagents')}
                 >
                   Subagents
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={settingsTab === 'skills'}
+                  className={`settings-tab-btn ${settingsTab === 'skills' ? 'active' : ''}`}
+                  onClick={() => setSettingsTab('skills')}
+                >
+                  Skills
                 </button>
                 <button
                   type="button"
@@ -2798,6 +2832,234 @@ export function WorkspaceDialog({
                 </>
               )}
 
+              {settingsTab === 'skills' && (
+                <>
+                  <label className="field-label" style={{ margin: '0 0 6px' }}>
+                    Skill Library
+                  </label>
+                  <p
+                    className="muted"
+                    style={{ margin: '0 0 12px', fontSize: '11px' }}
+                  >
+                    Skills are reusable instruction files your Dots load on
+                    demand. Add one here, or just ask a Dot to create a skill —
+                    it will capture the procedure with create_skill. Each task
+                    matching a skill's description runs with its instructions.
+                  </p>
+                  <div
+                    className="line-option-list"
+                    style={{ marginBottom: '16px' }}
+                  >
+                    {skillLoaded && skills.length === 0 && (
+                      <div
+                        className="line-option-row"
+                        style={{
+                          color: '#888',
+                          fontSize: '12px',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        No skills yet. Add one below or ask a Dot to create one
+                        for you.
+                      </div>
+                    )}
+                    {skills.map((skill) => (
+                      <div
+                        key={skill.name}
+                        className="line-option-row"
+                        style={{ alignItems: 'center' }}
+                      >
+                        <div className="line-option-content">
+                          <div className="line-option-header">
+                            <span className="line-option-title">
+                              {skill.name}
+                            </span>
+                            <span
+                              className="line-option-tag"
+                              style={{ textTransform: 'none' }}
+                            >
+                              skill
+                            </span>
+                          </div>
+                          <p
+                            className="line-option-desc"
+                            style={{ marginTop: '2px' }}
+                          >
+                            {skill.description}
+                          </p>
+                          {viewedSkill?.name === skill.name && (
+                            <pre
+                              className="line-option-desc mono"
+                              style={{
+                                marginTop: '6px',
+                                whiteSpace: 'pre-wrap',
+                                maxHeight: '220px',
+                                overflow: 'auto',
+                                background: 'rgba(0,0,0,0.03)',
+                                padding: '8px',
+                                borderRadius: '6px',
+                              }}
+                            >
+                              {viewedSkill.instructions}
+                            </pre>
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            marginLeft: 'auto',
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label={`View ${skill.name}`}
+                            onClick={() => {
+                              if (viewedSkill?.name === skill.name) {
+                                setViewedSkill(null);
+                                return;
+                              }
+                              void api<Skill>(`/skills/${skill.name}`).then(
+                                (full) => setViewedSkill(full),
+                              );
+                            }}
+                          >
+                            {viewedSkill?.name === skill.name ? 'Hide' : 'View'}
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label={`Edit ${skill.name}`}
+                            onClick={() => {
+                              void api<Skill>(`/skills/${skill.name}`).then(
+                                (full) => {
+                                  setEditingSkill(skill.name);
+                                  setNewSkillName(full.name);
+                                  setNewSkillDescription(full.description);
+                                  setNewSkillInstructions(full.instructions);
+                                },
+                              );
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label={`Delete ${skill.name}`}
+                            onClick={() => {
+                              void api(`/skills/${skill.name}`, 'DELETE')
+                                .then(() => {
+                                  setSkills((list) =>
+                                    list.filter(
+                                      (s) => s.name !== skill.name,
+                                    ),
+                                  );
+                                  setViewedSkill(null);
+                                })
+                                .catch(() =>
+                                  setSkillError('Could not delete skill.'),
+                                );
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <label className="field-label" style={{ margin: '0 0 6px' }}>
+                    {editingSkill ? `Edit “${editingSkill}”` : 'Add a skill'}
+                  </label>
+                  {skillError && (
+                    <p style={{ color: '#dc2626', fontSize: '12px', margin: '0 0 8px' }}>
+                      {skillError}
+                    </p>
+                  )}
+                  <input
+                    className="text-input"
+                    placeholder="skill-name (lowercase, hyphens)"
+                    value={newSkillName}
+                    onChange={(e) => setNewSkillName(e.target.value)}
+                    style={{ marginBottom: '8px' }}
+                  />
+                  <input
+                    className="text-input"
+                    placeholder="What this skill does and when to use it"
+                    value={newSkillDescription}
+                    onChange={(e) => setNewSkillDescription(e.target.value)}
+                    style={{ marginBottom: '8px' }}
+                  />
+                  <textarea
+                    className="text-input"
+                    placeholder="Step-by-step instructions (markdown) the Dot loads when it uses this skill"
+                    value={newSkillInstructions}
+                    onChange={(e) => setNewSkillInstructions(e.target.value)}
+                    rows={8}
+                    style={{ marginBottom: '8px', fontFamily: 'monospace', fontSize: '12px' }}
+                  />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      disabled={
+                        busy ||
+                        !newSkillName.trim() ||
+                        !newSkillDescription.trim() ||
+                        !newSkillInstructions.trim()
+                      }
+                      onClick={() => {
+                        setBusy(true);
+                        setSkillError('');
+                        const body = {
+                          name: newSkillName.trim(),
+                          description: newSkillDescription.trim(),
+                          instructions: newSkillInstructions,
+                        };
+                        const request = editingSkill
+                          ? api(`/skills/${editingSkill}`, 'PUT', body)
+                          : api('/skills', 'POST', body);
+                        request
+                          .then(() =>
+                            api<SkillSummary[]>('/skills').then((list) => {
+                              setSkills(Array.isArray(list) ? list : []);
+                              setNewSkillName('');
+                              setNewSkillDescription('');
+                              setNewSkillInstructions('');
+                              setEditingSkill(null);
+                            }),
+                          )
+                          .catch((e) =>
+                            setSkillError(
+                              e instanceof Error
+                                ? e.message
+                                : 'Could not save skill.',
+                            ),
+                          )
+                          .finally(() => setBusy(false));
+                      }}
+                    >
+                      {editingSkill ? 'Save changes' : 'Add skill'}
+                    </button>
+                    {editingSkill && (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => {
+                          setEditingSkill(null);
+                          setNewSkillName('');
+                          setNewSkillDescription('');
+                          setNewSkillInstructions('');
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
               {settingsTab === 'connectors' && (
                 <>
                   <label className="field-label" style={{ margin: '0 0 6px' }}>

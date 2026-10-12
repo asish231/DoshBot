@@ -138,6 +138,18 @@ export function App() {
   const [pageId, setPageId] = useState<string>();
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [memoryToDelete, setMemoryToDelete] = useState<Memory | null>(null);
+  // Memory graph: interconnection edges shown as chips on memory cards.
+  const [memoryEdges, setMemoryEdges] = useState<
+    Array<{ fromId: string; toId: string; relation: string }>
+  >([]);
+  useEffect(() => {
+    if (view !== 'memories') return;
+    void api<{
+      edges: Array<{ fromId: string; toId: string; relation: string }>;
+    }>('/memories/graph')
+      .then((graph) => setMemoryEdges(graph.edges ?? []))
+      .catch(() => setMemoryEdges([]));
+  }, [view, state?.memories.length]);
   const setDirtyPage = useCallback((value: boolean) => {
     dirtyPage.current = value;
   }, []);
@@ -1449,6 +1461,46 @@ export function App() {
                         </span>
                       </div>
                       <p>{memory.text}</p>
+                      {(() => {
+                        const links = memoryEdges
+                          .filter((edge) => edge.fromId === memory.id)
+                          .map((edge) => ({
+                            relation: edge.relation,
+                            target: state.memories.find(
+                              (m) => m.id === edge.toId,
+                            ),
+                          }))
+                          .filter((link) => link.target);
+                        if (links.length === 0) return null;
+                        return (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '4px',
+                              marginBottom: '6px',
+                            }}
+                          >
+                            {links.map((link) => (
+                              <span
+                                key={`${memory.id}-${link.target!.id}`}
+                                className="line-option-tag"
+                                style={{
+                                  textTransform: 'none',
+                                  fontSize: '10px',
+                                  maxWidth: '100%',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                                title={`${link.relation}: ${link.target!.text}`}
+                              >
+                                {link.relation} → {link.target!.text.slice(0, 40)}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
                       <div>
                         <small>
                           {state.settings.memoryAllowed

@@ -34,10 +34,12 @@ Current highlights:
 - **Ask questions** — `ask_question` human-in-the-loop cards (2–6 options, single/multi).
 - **Research** — `search_web` + `read_public_page` via Parallel, citations saved.
 - **24/7 scheduling** — server-side recurring tasks in their original conversation, pause/retry.
+- **Skills library** — reusable `SKILL.md` instruction files under `data/skills`; add them in Settings or via `/skills`, and Dots create skills for you on their own initiative (`create_skill`), load them before matching tasks (`read_skill`), and keep them current.
+- **Super memory graph** — workspace memories segmented by category with interconnection edges (`link_memories`), fuzzy search that survives typos (`search_memory`), a full graph view (`memory_graph` + `GET /api/memories/graph`), and link chips in the Memories UI. Collecting and personalizing from what you share is each Dot's own judgment.
 - **Spaces + Pages** — searchable library, visual editor, save conversation as page, review-before-save.
 - **Voice + calls, computer browser, Slack/Telegram** — realtime speech, isolated browser/workspace, channel SDKs.
 
-Slash commands: `/goal /code /plan /init /review /undo /subagents /compact /memory /model /tasks /new /mcp /schedule /search /browse /clear /help`. Each Dot can hire subagent swarms of any practical size (`run_subagents`: explore, plan, build, or general profiles; throttled execution, size is the agent's and owner's decision) and auto-escalates to a swarm on its own when a task is too big for one pass, knows every slash command and executes them directly on request, and manages its scheduled tasks end to end (`manage_schedule`: draft, start, list, pause, cancel).
+Slash commands: `/goal /code /plan /init /review /undo /subagents /skills /compact /memory /model /tasks /new /mcp /schedule /search /browse /clear /help`. Each Dot can hire subagent swarms of any practical size (`run_subagents`: explore, plan, build, or general profiles; throttled execution, size is the agent's and owner's decision) and auto-escalates to a swarm on its own when a task is too big for one pass, knows every slash command and executes them directly on request, sees its MCP connections by name and tool list, treats its Alpine computer as its own machine for writing and running code (`files_write` + `exec`), and manages its scheduled tasks end to end (`manage_schedule`: draft, start, list, pause, cancel).
 
 ## Get started
 
