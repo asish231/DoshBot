@@ -2,6 +2,8 @@ import { PageReviewCard } from './PageReviewCard';
 import { pageReviewSchema, pageReviewTool } from '../shared/page-review';
 import { AskQuestionCard } from './AskQuestionCard';
 import { askQuestionSchema, askQuestionTool } from '../shared/ask-question';
+import { CompactToolCard, getToolMeta } from './CompactToolCard';
+import { computerToolResult } from './ComputerToolCard';
 import { contextualMessage, type PageContext } from './page-context';
 import { api } from './api';
 import type { Page } from '../server/pages';
@@ -216,6 +218,8 @@ export function Chat({
   onComputer,
   onDeleteConversation,
   onOpenSettings,
+  onOpenTasks,
+  onNewChat,
 }: {
   thread: Conversation;
   dot: Dot;
@@ -229,6 +233,8 @@ export function Chat({
   onComputer?: () => void;
   onDeleteConversation?: () => void;
   onOpenSettings?: (tab?: string) => void;
+  onOpenTasks?: () => void;
+  onNewChat?: () => void;
 }) {
   const { agent, isReady } = useAgent({
     agentId: `chat-${thread.id}`,
@@ -423,6 +429,8 @@ export function Chat({
     }
     setError('');
     setRunning(true);
+    userStoppedRef.current = false;
+    runErrorRef.current = null;
     const commandLine = `/schedule${intervalSeconds ? ` ${intervalSeconds}` : ''}${objective ? ` ${objective}` : ''}`;
     const instruction = `\n\nUnfold this schedule request: call manage_schedule with action 'draft', a precise instructions text for the objective, and intervalSeconds ${intervalSeconds ?? 'null'} (null = ask me for the interval first). Then confirm with ask_question whether to start it, and only start on explicit approval.`;
     agent.addMessage({
@@ -430,15 +438,49 @@ export function Chat({
       role: 'user',
       content: commandLine + instruction,
     });
+    const MAX_RETRIES = 5;
+    let turnSuccess = false;
+    let lastError: unknown = null;
+    const initialMessageCount = agent.messages.length;
     try {
-      const result = await copilotkit.runAgent({ agent });
-      if (!result.newMessages.some((message) => message.role === 'assistant'))
-        throw new Error('The current turn returned no response.');
-      onSaved();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Scheduling failed.');
+      for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+        try {
+          runErrorRef.current = null;
+          if (attempt > 1) {
+            setError(`Scheduling failed. Retrying (${attempt - 1}/${MAX_RETRIES})…`);
+            if (agent.messages.length > initialMessageCount) {
+              agent.setMessages(agent.messages.slice(0, initialMessageCount));
+            }
+            await new Promise((r) => setTimeout(r, Math.min(1000 * Math.pow(1.4, attempt - 2), 4000)));
+          }
+          if (userStoppedRef.current) break;
+          const result = await copilotkit.runAgent({ agent });
+          if (userStoppedRef.current) break;
+          if (runErrorRef.current) throw new Error(runErrorRef.current);
+          if (!result.newMessages.some((message) => message.role === 'assistant'))
+            throw new Error('The current turn returned no response.');
+          setError('');
+          onSaved();
+          turnSuccess = true;
+          break;
+        } catch (e) {
+          lastError = e;
+          const msg = e instanceof Error ? e.message : String(e);
+          if (userStoppedRef.current || (e instanceof Error && (e.name === 'AbortError' || /abort|cancel|stop/i.test(msg)))) break;
+          console.warn(`[Chat] Schedule attempt ${attempt} failed:`, e);
+          if (attempt <= MAX_RETRIES) continue;
+        }
+      }
+      if (!turnSuccess && lastError && !userStoppedRef.current) {
+        setError(
+          lastError instanceof Error
+            ? `${lastError.message} (failed after ${MAX_RETRIES} retries)`
+            : 'Scheduling failed after retries.',
+        );
+      }
     } finally {
       setRunning(false);
+      userStoppedRef.current = false;
     }
   };
 
@@ -453,6 +495,24 @@ export function Chat({
         onOpenSettings('connectors');
       } else {
         void send('/mcp');
+      }
+    } else if (cmd.id === 'model') {
+      if (onOpenSettings) {
+        onOpenSettings('models');
+      } else {
+        void send('/model');
+      }
+    } else if (cmd.id === 'tasks') {
+      if (onOpenTasks) {
+        onOpenTasks();
+      } else {
+        void send('/tasks');
+      }
+    } else if (cmd.id === 'new') {
+      if (onNewChat) {
+        onNewChat();
+      } else {
+        void send('/new');
       }
     } else if (cmd.id === 'subagents') {
       setDraft('/subagents ');
@@ -811,12 +871,21 @@ export function Chat({
       void voice.start();
     }
   }, [loaded, thread.id, voice]);
+  const runErrorRef = useRef<string | null>(null);
+  const userStoppedRef = useRef(false);
+
   useEffect(() => {
     const subscription = copilotkit.subscribe({
-      onError: ({ error }) => setError(error.message),
+      onError: ({ error }) => {
+        runErrorRef.current = error.message;
+        setError(error.message);
+      },
     });
     const events = agent.subscribe({
-      onRunErrorEvent: ({ event }) => setError(event.message),
+      onRunErrorEvent: ({ event }) => {
+        runErrorRef.current = event.message;
+        setError(event.message);
+      },
       // Live chain-of-thought streaming (REASONING_* AG-UI events from
       // reasoning models — DeepSeek/Qwen/GLM/Kimi style reasoning_content).
       onReasoningStartEvent: () => {
@@ -892,7 +961,34 @@ export function Chat({
       }
       return;
     }
-    if (trimmed.startsWith('/schedule')) {
+    let outgoing = text;
+    if (trimmed === '/model') {
+      setDraft('');
+      if (onOpenSettings) {
+        onOpenSettings('models');
+        setCompactMessage('Opening model settings…');
+        setTimeout(() => setCompactMessage(null), 3000);
+        return;
+      }
+      outgoing =
+        'Which model are you running on right now? Briefly state your current model, and tell me how to switch models from Settings.';
+    } else if (trimmed === '/tasks') {
+      setDraft('');
+      if (onOpenTasks) {
+        onOpenTasks();
+        return;
+      }
+      outgoing =
+        'List every task and schedule in this workspace: call manage_schedule with action "list", then summarize each task with its status, interval, and next run.';
+    } else if (trimmed === '/new') {
+      setDraft('');
+      if (onNewChat) {
+        onNewChat();
+        return;
+      }
+      outgoing =
+        'We are starting fresh. Acknowledge briefly and ignore prior context.';
+    } else if (trimmed.startsWith('/schedule')) {
       const rest = trimmed.slice(9).trim();
       const match = rest.match(/^(\d+)\s*(.*)$/);
       const interval = match ? Number(match[1]) : null;
@@ -953,7 +1049,6 @@ export function Chat({
       }
     }
 
-    let outgoing = text;
     if (trimmed.startsWith('/goal ')) {
       const goal = trimmed.slice(6).trim();
       outgoing = `**Goal Mode Active**\nObjective: ${goal}\n\nPlease autonomously plan and execute all necessary steps, inspect tool evidence, verify completion, and do not stop until fully achieved.`;
@@ -963,9 +1058,18 @@ export function Chat({
     } else if (trimmed.startsWith('/plan ')) {
       const planTask = trimmed.slice(6).trim();
       outgoing = `**Plan Mode Active**\nTask: ${planTask}\n\nPlease formulate an explicit, phased execution plan with milestone checkboxes and dependencies.`;
+    } else if (trimmed.startsWith('/init')) {
+      const target = trimmed.slice(5).trim();
+      outgoing = `**Workspace Init Active**\n${target ? `Focus: ${target}\n` : ''}Please inspect the connected workspace and create or update an AGENTS.md file at its root documenting: project purpose, directory structure, build and test commands, key conventions, and any gotchas a coding agent must know. Show me the file you wrote.`;
+    } else if (trimmed.startsWith('/review')) {
+      const target = trimmed.slice(7).trim();
+      outgoing = `**Code Review Active**\n${target ? `Review target: ${target}\n` : 'Review the current changes (check git status and git diff first).\n'}Please report findings in severity order (critical, high, medium, low) with file and line references, and only report real issues you verified in the code.`;
+    } else if (trimmed.startsWith('/undo')) {
+      const note = trimmed.slice(5).trim();
+      outgoing = `**Undo Active**\n${note ? `Scope note: ${note}\n` : ''}Please inspect the most recent edits in the connected workspace (git status, git diff, and recent changes), show me a concise summary of what changed, and ask me to confirm before reverting. Only revert after my explicit approval.`;
     } else if (trimmed.startsWith('/subagents')) {
       const mission = trimmed.slice(11).trim();
-      outgoing = `**Swarm Mode Active**\nMission: ${mission || '(see conversation context)'}\n\nSplit this mission into 2-5 independent parallel tracks and execute them with ONE run_subagents call (all tracks at once). Then synthesize the merged per-track results into a single final answer with evidence.`;
+      outgoing = `**Swarm Mode Active**\nMission: ${mission || '(see conversation context)'}\n\nSplit this mission into 2-8 independent parallel tracks and execute them with ONE run_subagents call (all tracks at once). Give each track a name and pick the right specialist agent profile for it (explore for read-only research, plan for planning, build or general for hands-on work). Then synthesize the merged per-track results into a single final answer with evidence.`;
     } else if (trimmed.startsWith('/search ')) {
       const q = trimmed.slice(8).trim();
       outgoing = `Please search the web for "${q}" and summarize findings with source citations.`;
@@ -973,7 +1077,7 @@ export function Chat({
       const url = trimmed.slice(8).trim();
       outgoing = `Please navigate to ${url} using your computer browser tool and inspect the page content.`;
     } else if (trimmed === '/help') {
-      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /subagents, /compact, /memory, /mcp, /schedule, /search, /browse, /clear) and explain how to use them with MCP and local tools.`;
+      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /init, /review, /undo, /subagents, /compact, /memory, /model, /tasks, /new, /mcp, /schedule, /search, /browse, /clear) and explain briefly how to use each.`;
     }
 
     const attachmentContext = buildAttachmentContext();
@@ -983,6 +1087,8 @@ export function Chat({
 
     setError('');
     setRunning(true);
+    userStoppedRef.current = false;
+    runErrorRef.current = null;
     agent.addMessage({
       id: crypto.randomUUID(),
       role: 'user',
@@ -993,21 +1099,83 @@ export function Chat({
     setSource('');
     setSourceOpen(false);
     setSlashMenuOpen(false);
+    const MAX_RETRIES = 5;
+    let turnSuccess = false;
+    let lastError: unknown = null;
+    const initialMessageCount = agent.messages.length;
     try {
-      const result = await copilotkit.runAgent({ agent });
-      if (!result.newMessages.some((message) => message.role === 'assistant'))
-        throw new Error(
-          'The current turn returned no response. Check the runtime connection and retry.',
-        );
-      onSaved();
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'The turn failed. Your conversation remains saved.',
-      );
+      for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+        try {
+          runErrorRef.current = null;
+          if (attempt > 1) {
+            setError(
+              `Turn encountered an issue. Retrying (${attempt - 1}/${MAX_RETRIES})…`,
+            );
+            if (agent.messages.length > initialMessageCount) {
+              agent.setMessages(agent.messages.slice(0, initialMessageCount));
+            }
+            const delay = Math.min(1000 * Math.pow(1.4, attempt - 2), 4000);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
+
+          if (userStoppedRef.current) break;
+
+          const result = await copilotkit.runAgent({ agent });
+
+          if (userStoppedRef.current) break;
+
+          if (runErrorRef.current) {
+            throw new Error(runErrorRef.current);
+          }
+
+          const assistantMessages = result.newMessages.filter(
+            (message) => message.role === 'assistant',
+          );
+          if (!assistantMessages.length) {
+            throw new Error(
+              'The current turn returned no response. Check the runtime connection and retry.',
+            );
+          }
+
+          setError('');
+          onSaved();
+          turnSuccess = true;
+          lastError = null;
+          break;
+        } catch (e) {
+          lastError = e;
+          const msg = e instanceof Error ? e.message : String(e);
+          const isAbort =
+            userStoppedRef.current ||
+            (e instanceof Error && e.name === 'AbortError') ||
+            /abort|cancel|stop/i.test(msg);
+          if (isAbort) {
+            break;
+          }
+          console.warn(`[Chat] Turn attempt ${attempt} failed:`, e);
+          if (attempt <= MAX_RETRIES) {
+            continue;
+          }
+        }
+      }
+
+      if (!turnSuccess && lastError && !userStoppedRef.current) {
+        const msg =
+          lastError instanceof Error ? lastError.message : String(lastError);
+        const isAbort =
+          (lastError instanceof Error && lastError.name === 'AbortError') ||
+          /abort|cancel|stop/i.test(msg);
+        if (!isAbort) {
+          setError(
+            lastError instanceof Error
+              ? `${lastError.message} (failed after ${MAX_RETRIES} retries)`
+              : `The turn failed after ${MAX_RETRIES} retries. Your conversation remains saved.`,
+          );
+        }
+      }
     } finally {
       setRunning(false);
+      userStoppedRef.current = false;
     }
   };
   const sendLatest = useRef<((text: string) => Promise<void>) | null>(null);
@@ -1075,7 +1243,10 @@ export function Chat({
             showScreen={props.toolCallId === latestBrowserCall?.id}
             onExpand={onComputer}
           />
-        ) : null,
+        ) : props.name === pageReviewTool.name ||
+          props.name === askQuestionTool.name ? null : (
+          <CompactToolCard {...props} running={running} />
+        ),
     },
     [dot.id, dot.name, running, latestBrowserCall?.id, onComputer],
   );
@@ -1085,12 +1256,21 @@ export function Chat({
       ['user', 'assistant'].includes(message.role) &&
       ((typeof message.content === 'string' && message.content.trim()) ||
         (message.role === 'assistant' &&
-          message.toolCalls?.some(
-            (call) =>
-              call.function.name.startsWith('computer_') ||
-              call.function.name === pageReviewTool.name,
-          ))),
+          (message.toolCalls?.length ?? 0) > 0)),
   );
+
+  const latestAssistantMessage = agent.messages.findLast(
+    (m) => m.role === 'assistant',
+  );
+  const activeToolCall = running
+    ? latestAssistantMessage?.toolCalls?.at(-1)
+    : undefined;
+  const activeToolMeta = activeToolCall
+    ? getToolMeta(
+        activeToolCall.function.name,
+        computerToolResult(activeToolCall.function.arguments),
+      )
+    : null;
 
   const tokenUsage = calculateTokenUsage(agent.messages, currentModel);
   useEffect(() => {
@@ -1276,11 +1456,23 @@ export function Chat({
           </div>
         )}
         {running && !liveThinking && (
-          <div className="thinking">
+          <div className="thinking" role="status">
             <span />
             <span />
             <span />
-            <span>{dot.name} is thinking</span>
+            <span>
+              {activeToolMeta
+                ? `${dot.name} is using ${activeToolMeta.label}`
+                : `${dot.name} is thinking`}
+            </span>
+            {activeToolMeta && (
+              <span className="live-tool-indicator-badge">
+                <activeToolMeta.Icon size={12} />
+                <span>
+                  {activeToolMeta.summary || activeToolCall?.function.name}
+                </span>
+              </span>
+            )}
           </div>
         )}
         <div ref={bottom} />
@@ -1295,20 +1487,111 @@ export function Chat({
       )}
       {(error || voice.error) && (
         <div className="chat-error" role="alert">
-          {error || voice.error}
-          {error && (
-            <button
-              onClick={() => {
-                setError('');
-                void copilotkit
-                  .connectAgent({ agent })
-                  .then(() => setLoaded(true))
-                  .catch((e) => setError(e.message));
-              }}
-            >
-              Reconnect
-            </button>
-          )}
+          <span>{error || voice.error}</span>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {error && (
+              <button
+                type="button"
+                onClick={() => {
+                  setError('');
+                  setRunning(true);
+                  userStoppedRef.current = false;
+                  runErrorRef.current = null;
+                  void (async () => {
+                    const MAX_RETRIES = 5;
+                    let turnSuccess = false;
+                    let lastError: unknown = null;
+                    const msgs = agent.messages;
+                    const lastMsg = msgs.at(-1);
+                    const lastHasToolCalls =
+                      lastMsg &&
+                      'toolCalls' in lastMsg &&
+                      Array.isArray(lastMsg.toolCalls) &&
+                      lastMsg.toolCalls.length > 0;
+                    if (
+                      lastMsg &&
+                      lastMsg.role === 'assistant' &&
+                      (!lastMsg.content || !String(lastMsg.content).trim()) &&
+                      !lastHasToolCalls
+                    ) {
+                      agent.setMessages(msgs.slice(0, -1));
+                    }
+                    const initialMessageCount = agent.messages.length;
+
+                    for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+                      try {
+                        runErrorRef.current = null;
+                        if (attempt > 1) {
+                          setError(
+                            `Turn encountered an issue. Retrying (${attempt - 1}/${MAX_RETRIES})…`,
+                          );
+                          if (agent.messages.length > initialMessageCount) {
+                            agent.setMessages(agent.messages.slice(0, initialMessageCount));
+                          }
+                          await new Promise((r) =>
+                            setTimeout(
+                              r,
+                              Math.min(1000 * Math.pow(1.4, attempt - 2), 4000),
+                            ),
+                          );
+                        }
+                        if (userStoppedRef.current) break;
+                        const result = await copilotkit.runAgent({ agent });
+                        if (userStoppedRef.current) break;
+                        if (runErrorRef.current) throw new Error(runErrorRef.current);
+                        if (
+                          !result.newMessages.some(
+                            (m) => m.role === 'assistant',
+                          )
+                        ) {
+                          throw new Error('The turn returned no response.');
+                        }
+                        setError('');
+                        onSaved();
+                        turnSuccess = true;
+                        break;
+                      } catch (e) {
+                        lastError = e;
+                        const msg = e instanceof Error ? e.message : String(e);
+                        if (
+                          userStoppedRef.current ||
+                          (e instanceof Error &&
+                            (e.name === 'AbortError' || /abort|cancel|stop/i.test(msg)))
+                        )
+                          break;
+                        if (attempt <= MAX_RETRIES) continue;
+                      }
+                    }
+                    if (!turnSuccess && lastError && !userStoppedRef.current) {
+                      setError(
+                        lastError instanceof Error
+                          ? `${lastError.message} (failed after ${MAX_RETRIES} retries)`
+                          : 'Turn failed after retries.',
+                      );
+                    }
+                    setRunning(false);
+                    userStoppedRef.current = false;
+                  })();
+                }}
+              >
+                Retry turn
+              </button>
+            )}
+            {error && (
+              <button
+                type="button"
+                onClick={() => {
+                  setError('');
+                  void copilotkit
+                    .connectAgent({ agent })
+                    .then(() => setLoaded(true))
+                    .catch((e) => setError(e.message));
+                }}
+              >
+                Reconnect
+              </button>
+            )}
+          </div>
         </div>
       )}
       <CallView
@@ -1457,9 +1740,12 @@ export function Chat({
                   type="button"
                   className="composer-send-btn stop"
                   aria-label="Stop response"
-                  onClick={() => copilotkit.stopAgent({ agent })}
+                  onClick={() => {
+                    userStoppedRef.current = true;
+                    copilotkit.stopAgent({ agent });
+                  }}
                 >
-                  <Square size={15} />
+                  <Square size={13} />
                 </button>
               ) : (
                 <button
@@ -1473,7 +1759,7 @@ export function Chat({
                     paused
                   }
                 >
-                  <ArrowUp size={18} strokeWidth={2.5} />
+                  <ArrowUp size={15} strokeWidth={2.5} />
                 </button>
               )}
 
@@ -1485,7 +1771,7 @@ export function Chat({
                   title="Add files, images, links or local folder"
                   onClick={() => setAttachMenuOpen(!attachMenuOpen)}
                 >
-                  <Plus size={18} strokeWidth={2} />
+                  <Plus size={15} strokeWidth={2.2} />
                 </button>
                 {attachMenuOpen && (
                   <div className="chat-popover-menu attach-menu">
@@ -1581,7 +1867,7 @@ export function Chat({
                       : 'Folder tools are off — click to turn them on.'
                   }
                 >
-                  <FolderGit2 size={14} />
+                  <FolderGit2 size={13} />
                   <span>
                     {codingEnabled
                       ? connectedDir || 'Connect folder'
@@ -1808,7 +2094,7 @@ export function Chat({
                 >
                   <span>{formatModelName(currentModel)}</span>
                   <ChevronDown
-                    size={14}
+                    size={12}
                     className={`pill-chevron ${modelOpen ? 'rotated' : ''}`}
                   />
                 </button>
@@ -1873,10 +2159,10 @@ export function Chat({
                   }}
                   aria-label="Select Reasoning Effort"
                 >
-                  <BarChart2 size={15} strokeWidth={2.2} />
+                  <BarChart2 size={13} strokeWidth={2.2} />
                   <span>{formatEffortName(currentEffort)}</span>
                   <ChevronDown
-                    size={14}
+                    size={12}
                     className={`pill-chevron ${effortOpen ? 'rotated' : ''}`}
                   />
                 </button>
@@ -1939,7 +2225,7 @@ export function Chat({
                 }
                 onClick={() => void stt.toggleRecording()}
               >
-                <Mic size={17} />
+                <Mic size={15} />
               </button>
 
               {/* Audio / Voice Call & STT Selector */}
@@ -1963,9 +2249,9 @@ export function Chat({
                     }
                   }}
                 >
-                  <AudioLines size={18} />
+                  <AudioLines size={15} />
                   <ChevronDown
-                    size={14}
+                    size={12}
                     className={`pill-chevron ${audioOpen ? 'rotated' : ''}`}
                   />
                 </button>
@@ -2045,33 +2331,35 @@ export function Chat({
           </div>
         </div>
 
-        {/* Suggestion Chips Below Composer Box */}
-        <div className="composer-suggestions">
-          <button
-            type="button"
-            onClick={() => setDraft('Help me think this through')}
-          >
-            <Lightbulb size={16} />
-            <span>Help me think this through</span>
-            <ArrowUpRight size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setDraft('Research a public page')}
-          >
-            <Search size={16} />
-            <span>Research a public page</span>
-            <ArrowUpRight size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setDraft('Make a plan I can follow')}
-          >
-            <FileText size={16} />
-            <span>Make a plan I can follow</span>
-            <ArrowUpRight size={14} />
-          </button>
-        </div>
+        {/* Suggestion Chips Below Composer Box — only visible on empty chat without draft */}
+        {agent.messages.length === 0 && !draft.trim() && (
+          <div className="composer-suggestions">
+            <button
+              type="button"
+              onClick={() => setDraft('Help me think this through')}
+            >
+              <Lightbulb size={14} />
+              <span>Help me think this through</span>
+              <ArrowUpRight size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDraft('Research a public page')}
+            >
+              <Search size={14} />
+              <span>Research a public page</span>
+              <ArrowUpRight size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDraft('Make a plan I can follow')}
+            >
+              <FileText size={14} />
+              <span>Make a plan I can follow</span>
+              <ArrowUpRight size={12} />
+            </button>
+          </div>
+        )}
       </form>
 
       {/* Delete Chat Confirmation Modal */}

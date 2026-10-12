@@ -193,7 +193,7 @@ export async function getOpenCodeStatus(
           m.includes('free') ||
           m === 'opencode/big-pickle';
         const item: OpenCodeModelMeta = {
-          id: m,
+          id: m.startsWith('opencode/') ? m : `opencode/${m}`,
           name: m.replace(/^opencode\//, ''),
           provider: 'OpenCode',
           isFree,
@@ -251,6 +251,8 @@ export interface OpenCodeRunOptions {
   timeoutMs?: number;
   /** Workspace file paths to attach via `opencode run --file` (repeatable). */
   files?: string[];
+  /** OpenCode agent profile: build | plan | general | explore. */
+  agent?: string;
 }
 
 export interface OpenCodeRunResult {
@@ -281,6 +283,9 @@ export async function runOpenCode(
   }
   if (options.variant && options.variant !== 'default') {
     args.push('--variant', options.variant);
+  }
+  if (options.agent) {
+    args.push('--agent', options.agent);
   }
   for (const f of options.files ?? []) {
     if (f.trim()) args.push('--file', f);

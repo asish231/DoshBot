@@ -211,6 +211,8 @@ export function App() {
       'goal',
       'code',
       'plan',
+      'init',
+      'review',
       'subagents',
       'memory',
       'schedule',
@@ -886,6 +888,8 @@ export function App() {
                       initialTab: tab as SettingsTab | undefined,
                     })
                   }
+                  onOpenTasks={() => setView('tasks')}
+                  onNewChat={() => void newConversation()}
                 />
               ) : (
                 <div className="new-conversation doshbot-hero">
@@ -1063,7 +1067,7 @@ export function App() {
                           aria-label="Start conversation"
                           disabled={!configured || busy || !prompt.trim()}
                         >
-                          <ArrowUp size={18} strokeWidth={2.5} />
+                          <ArrowUp size={15} strokeWidth={2.5} />
                         </button>
                         <button
                           type="button"
@@ -1074,7 +1078,7 @@ export function App() {
                             if (url) setPrompt((p) => `From ${url}:\n\n${p}`);
                           }}
                         >
-                          <Plus size={18} strokeWidth={2} />
+                          <Plus size={15} strokeWidth={2.2} />
                         </button>
                       </div>
 
@@ -1099,7 +1103,7 @@ export function App() {
                               {formatModelName(dot.model || 'auto-code')}
                             </span>
                             <ChevronDown
-                              size={14}
+                              size={12}
                               className={`pill-chevron ${homeModelOpen ? 'rotated' : ''}`}
                             />
                           </button>
@@ -1175,14 +1179,14 @@ export function App() {
                             title="Reasoning Effort"
                             aria-label="Reasoning Effort"
                           >
-                            <BarChart2 size={15} strokeWidth={2.2} />
+                            <BarChart2 size={13} strokeWidth={2.2} />
                             <span>
                               {formatEffortName(
                                 dot.reasoningEffort || 'default',
                               )}
                             </span>
                             <ChevronDown
-                              size={14}
+                              size={12}
                               className={`pill-chevron ${homeEffortOpen ? 'rotated' : ''}`}
                             />
                           </button>
@@ -1238,7 +1242,7 @@ export function App() {
                           }
                           onClick={() => void stt.toggleRecording()}
                         >
-                          <Mic size={17} />
+                          <Mic size={15} />
                         </button>
 
                         {/* Audio / Voice Call & STT Selector */}
@@ -1257,9 +1261,9 @@ export function App() {
                               setHomeEffortOpen(false);
                             }}
                           >
-                            <AudioLines size={18} />
+                            <AudioLines size={15} />
                             <ChevronDown
-                              size={14}
+                              size={12}
                               className={`pill-chevron ${homeAudioOpen ? 'rotated' : ''}`}
                             />
                           </button>
@@ -1340,35 +1344,37 @@ export function App() {
                       </div>
                     </div>
                   </form>
-                  <div className="composer-suggestions">
-                    <button
-                      type="button"
-                      disabled={!configured}
-                      onClick={() => setPrompt('Help me think this through')}
-                    >
-                      <Lightbulb size={16} />
-                      <span>Help me think this through</span>
-                      <ArrowUpRight size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!configured}
-                      onClick={() => setPrompt('Research a public page')}
-                    >
-                      <Search size={16} />
-                      <span>Research a public page</span>
-                      <ArrowUpRight size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!configured}
-                      onClick={() => setPrompt('Make a plan I can follow')}
-                    >
-                      <FileText size={16} />
-                      <span>Make a plan I can follow</span>
-                      <ArrowUpRight size={14} />
-                    </button>
-                  </div>
+                  {!prompt.trim() && (
+                    <div className="composer-suggestions">
+                      <button
+                        type="button"
+                        disabled={!configured}
+                        onClick={() => setPrompt('Help me think this through')}
+                      >
+                        <Lightbulb size={14} />
+                        <span>Help me think this through</span>
+                        <ArrowUpRight size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!configured}
+                        onClick={() => setPrompt('Research a public page')}
+                      >
+                        <Search size={14} />
+                        <span>Research a public page</span>
+                        <ArrowUpRight size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!configured}
+                        onClick={() => setPrompt('Make a plan I can follow')}
+                      >
+                        <FileText size={14} />
+                        <span>Make a plan I can follow</span>
+                        <ArrowUpRight size={12} />
+                      </button>
+                    </div>
+                  )}
                   <div className="connection-note">
                     <span
                       className={`online-dot ${workspace.setup.slack === 'online' ? '' : 'off'}`}

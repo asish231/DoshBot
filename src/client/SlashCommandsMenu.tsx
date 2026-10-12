@@ -37,6 +37,33 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     category: 'execution',
   },
   {
+    id: 'init',
+    command: '/init',
+    name: 'Init Workspace',
+    description:
+      'Create or update an AGENTS.md instructions file for the connected workspace',
+    placeholder: '/init ',
+    category: 'execution',
+  },
+  {
+    id: 'review',
+    command: '/review',
+    name: 'Code Review',
+    description:
+      'Review current changes or given files with severity-ranked findings',
+    placeholder: '/review ',
+    category: 'execution',
+  },
+  {
+    id: 'undo',
+    command: '/undo',
+    name: 'Undo Changes',
+    description:
+      'Show the most recent workspace edits and revert them after approval',
+    placeholder: '/undo ',
+    category: 'execution',
+  },
+  {
     id: 'compact',
     command: '/compact',
     name: 'Compact Context',
@@ -59,7 +86,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     command: '/subagents',
     name: 'Subagent Swarm',
     description:
-      'Split the task across 2-5 parallel subagents and merge results',
+      'Hire 2-8 specialist subagents in parallel and merge results',
     category: 'tools',
   },
   {
@@ -77,6 +104,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: 'Run recurring task or scheduled background workflow',
     placeholder: '/schedule 3600 ',
     category: 'automation',
+  },
+  {
+    id: 'tasks',
+    command: '/tasks',
+    name: 'My Tasks',
+    description: 'Open the Tasks view to inspect runs, schedules, and drafts',
+    category: 'automation',
+    immediate: true,
   },
   {
     id: 'search',
@@ -99,6 +134,22 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     command: '/clear',
     name: 'Clear Chat',
     description: 'Reset current chat messages and start fresh',
+    category: 'context',
+    immediate: true,
+  },
+  {
+    id: 'model',
+    command: '/model',
+    name: 'Switch Model',
+    description: 'Open model settings to change the Dot or OpenCode model',
+    category: 'tools',
+    immediate: true,
+  },
+  {
+    id: 'new',
+    command: '/new',
+    name: 'New Chat',
+    description: 'Start a fresh conversation with this Dot',
     category: 'context',
     immediate: true,
   },

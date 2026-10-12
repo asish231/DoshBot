@@ -37,7 +37,7 @@ Current highlights:
 - **Spaces + Pages** — searchable library, visual editor, save conversation as page, review-before-save.
 - **Voice + calls, computer browser, Slack/Telegram** — realtime speech, isolated browser/workspace, channel SDKs.
 
-Slash commands: `/goal /code /plan /compact /memory /mcp /subagents /schedule /search /browse /clear /help`.
+Slash commands: `/goal /code /plan /init /review /undo /subagents /compact /memory /model /tasks /new /mcp /schedule /search /browse /clear /help`. Each Dot can also hire 2-8 specialist subagents per call (`run_subagents`: explore, plan, build, or general profiles) and manage its scheduled tasks end to end (`manage_schedule`: draft, start, list, pause, cancel).
 
 ## Get started
 
@@ -68,7 +68,7 @@ See [Setup](docs/SETUP.md) for models, Parallel search, browser service, voice, 
 | Tokens          | Per-session `↑in ↓out (%)`, model context windows (Gemini 2M, Claude/Kimi 200k, DeepSeek/GPT 128k), click-to-compact                                          |
 | Memory          | Global + per-session SQLite tables, categories, `/memory`, session isolation + cascade delete                                                                 |
 | Context cache   | `local_thread_runs` persistence, `/compact` checkpoint, `/clear` reset, research `captures`                                                                   |
-| Execution modes | `/goal` autonomous, `/code` repo work, `/plan` milestones, `/search` + `/browse` research                                                                     |
+| Execution modes | `/goal` autonomous, `/code` repo work, `/plan` milestones, `/init` AGENTS.md, `/review` + `/undo` safe edits, `/search` + `/browse` research                     |
 | Human-in-loop   | `ask_question` cards, page review Approve & save, `ask` coding permission blocks writes until the owner flips to auto                                         |
 | Scheduling      | Recurring server tasks, pause/resume, run history, receipts in-thread                                                                                         |
 | Budgets         | Per-Dot monthly token budget with hard stop, usage readout, owner reset (`usage_events` table)                                                                |
