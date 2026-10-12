@@ -854,6 +854,23 @@ export function Chat({
         console.warn('[Chat] Attachment upload failed:', e);
       }
     }
+    // Auto-capture: text attachments go straight into this conversation's
+    // task memory as raw markdown, so the full content is retrievable even
+    // when the inline copy is truncated. Binaries are extracted agent-side.
+    for (const a of attachments) {
+      if (a.kind !== 'text' || a.textContent === undefined) continue;
+      try {
+        await api(`/conversations/${thread.id}/task-memory`, 'POST', {
+          name: a.name,
+          summary: `Attached file "${a.name}" — full raw content captured on upload.`,
+          content: a.textContent,
+          kind: 'file',
+          source: a.name,
+        });
+      } catch {
+        /* task-memory capture is best-effort; the inline copy still works */
+      }
+    }
     const parts: string[] = ['\n\n--- Attached files ---'];
     for (const a of attachments) {
       const uploadRef = uploadIds.get(a.id);
@@ -871,7 +888,7 @@ export function Chat({
       } else if (a.kind === 'text' && a.textContent !== undefined) {
         const truncated =
           a.textContent.length >= 60000
-            ? '\n[content truncated at 60000 chars — ask for the connected folder path to read the rest via str_replace_editor]'
+            ? '\n[content truncated at 60000 chars — the FULL raw content was saved to task memory as an entry: read it with read_task_memory instead of asking the user to re-send]'
             : '';
         parts.push(
           `\n[Attached file: ${a.name}]${uploadNote}\n\`\`\`\n${a.textContent}\n\`\`\`${truncated}`,

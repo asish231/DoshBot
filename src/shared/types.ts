@@ -134,6 +134,24 @@ export interface Artifact {
   content: string;
   createdAt: number;
 }
+/**
+ * One entry in a conversation's task memory — the working set for long
+ * context material. `summary` is the cheap line the Dot sees in context;
+ * `content` holds the full extracted data (e.g. a PDF as raw markdown)
+ * and is read on demand.
+ */
+export interface TaskMemoryEntry {
+  id: string;
+  threadId: string;
+  name: string;
+  summary: string;
+  content: string;
+  kind: 'file' | 'image' | 'note';
+  source?: string | null;
+  bytes: number;
+  createdAt: number;
+  updatedAt: number;
+}
 export interface Detail {
   task: Task;
   runs: Run[];

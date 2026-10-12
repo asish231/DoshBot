@@ -5,12 +5,14 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { validateLearningSettings } from '../shared/learning.js';
+import { fuzzyRank } from './fuzzy.js';
 import type {
   CallReceipt,
   Conversation,
   Dot,
   SessionMemory,
   Space,
+  TaskMemoryEntry,
 } from '../shared/types.js';
 export class WorkspaceStore {
   private db: DatabaseSync;
@@ -33,6 +35,8 @@ export class WorkspaceStore {
       CREATE INDEX IF NOT EXISTS idx_local_thread_runs_threadId ON local_thread_runs(threadId, createdAt ASC);
       CREATE TABLE IF NOT EXISTS session_memories(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, text TEXT NOT NULL, category TEXT, createdAt INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_session_memories_threadId ON session_memories(threadId, createdAt DESC);
+      CREATE TABLE IF NOT EXISTS task_memory(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, name TEXT NOT NULL, summary TEXT NOT NULL, content TEXT NOT NULL, kind TEXT NOT NULL, source TEXT, bytes INTEGER NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_task_memory_thread ON task_memory(threadId, updatedAt DESC);
       CREATE TABLE IF NOT EXISTS usage_events(id INTEGER PRIMARY KEY AUTOINCREMENT, dotId TEXT NOT NULL, tokens INTEGER NOT NULL, createdAt INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_usage_events_dotId ON usage_events(dotId, createdAt DESC);
       CREATE TABLE IF NOT EXISTS telegram_threads(chatId INTEGER PRIMARY KEY, threadId TEXT NOT NULL);`);
@@ -327,6 +331,7 @@ export class WorkspaceStore {
     this.db.prepare('DELETE FROM page_threads WHERE threadId=?').run(id);
     this.db.prepare('DELETE FROM page_reviews WHERE threadId=?').run(id);
     this.db.prepare('DELETE FROM session_memories WHERE threadId=?').run(id);
+    this.db.prepare('DELETE FROM task_memory WHERE threadId=?').run(id);
     this.db.prepare('DELETE FROM telegram_threads WHERE threadId=?').run(id);
   }
   /** Estimated tokens spent by a Dot this calendar month (budget accounting). */
@@ -407,6 +412,99 @@ export class WorkspaceStore {
     return Number(
       this.db
         .prepare('DELETE FROM session_memories WHERE threadId=?')
+        .run(threadId).changes,
+    );
+  }
+  /**
+   * Task memory — the conversation's working set. Each entry is like a file:
+   * a name, a SMALL summary that enters context cheaply, and the FULL
+   * extracted content (e.g. a PDF converted to raw markdown) retrieved only
+   * when needed. Long-context material lives here instead of the prompt.
+   */
+  taskMemories(threadId: string): TaskMemoryEntry[] {
+    return this.db
+      .prepare('SELECT * FROM task_memory WHERE threadId=? ORDER BY createdAt')
+      .all(threadId) as unknown as TaskMemoryEntry[];
+  }
+  taskMemory(id: string): TaskMemoryEntry | undefined {
+    return this.db
+      .prepare('SELECT * FROM task_memory WHERE id=?')
+      .get(id) as unknown as TaskMemoryEntry | undefined;
+  }
+  saveTaskMemory(
+    threadId: string,
+    name: string,
+    summary: string,
+    content: string,
+    kind: 'file' | 'image' | 'note' = 'note',
+    source: string | null = null,
+  ): TaskMemoryEntry {
+    this.requireThread(threadId);
+    const now = Date.now();
+    // Upsert by (threadId, name): re-extracting a source file replaces its
+    // old entry instead of piling up duplicates.
+    const existing = this.db
+      .prepare(
+        'SELECT id FROM task_memory WHERE threadId=? AND name=? ORDER BY createdAt DESC LIMIT 1',
+      )
+      .get(threadId, name) as { id: string } | undefined;
+    const id = existing?.id ?? randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO task_memory (id, threadId, name, summary, content, kind, source, bytes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET summary=excluded.summary, content=excluded.content, kind=excluded.kind, source=COALESCE(excluded.source, task_memory.source), bytes=excluded.bytes, updatedAt=excluded.updatedAt`,
+      )
+      .run(id, threadId, name, summary, content, kind, source, content.length, now, now);
+    return this.taskMemory(id)!;
+  }
+  appendTaskMemory(
+    threadId: string,
+    name: string,
+    content: string,
+    summary?: string,
+  ): TaskMemoryEntry | undefined {
+    const entries = this.db
+      .prepare('SELECT id FROM task_memory WHERE threadId=? AND name=? ORDER BY createdAt DESC LIMIT 1')
+      .get(threadId, name) as { id: string } | undefined;
+    if (!entries) return undefined;
+    const now = Date.now();
+    this.db
+      .prepare(
+        'UPDATE task_memory SET content=content || ?, bytes=bytes + ?, summary=COALESCE(?, summary), updatedAt=? WHERE id=?',
+      )
+      .run(`\n${content}`, content.length, summary ?? null, now, entries.id);
+    return this.taskMemory(entries.id);
+  }
+  searchTaskMemory(
+    threadId: string,
+    query: string,
+    limit = 8,
+  ): Array<TaskMemoryEntry & { score: number; strength: number }> {
+    return fuzzyRank(
+      query,
+      this.taskMemories(threadId).map((entry) => ({
+        // The haystack: name + summary carry the most signal; the full
+        // content joins so deep matches still surface.
+        text: `${entry.name}\n${entry.summary}\n${entry.content}`,
+        category: entry.kind,
+        entry,
+      })),
+      limit,
+    ).map((match) => ({
+      ...(match.item.entry as TaskMemoryEntry),
+      score: match.score,
+      strength: match.strength,
+    }));
+  }
+  deleteTaskMemory(id: string): boolean {
+    return (
+      this.db.prepare('DELETE FROM task_memory WHERE id=?').run(id).changes > 0
+    );
+  }
+  clearTaskMemory(threadId: string): number {
+    return Number(
+      this.db
+        .prepare('DELETE FROM task_memory WHERE threadId=?')
         .run(threadId).changes,
     );
   }

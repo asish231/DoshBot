@@ -304,6 +304,78 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     return c.json({ cleared: count });
   });
 
+  // Task memory: the conversation's working set for long context data.
+  // Entries are like files — small summary in context, full content on demand.
+  app.get('/conversations/:threadId/task-memory', (c) => {
+    const threadId = c.req.param('threadId');
+    // Summaries only by default; full content needs ?full=1 or a single read.
+    const entries = platform.workspace.taskMemories(threadId);
+    if (c.req.query('full') !== '1') {
+      return c.json(
+        entries.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          summary: entry.summary,
+          kind: entry.kind,
+          source: entry.source ?? null,
+          bytes: entry.bytes,
+          createdAt: entry.createdAt,
+          updatedAt: entry.updatedAt,
+        })),
+      );
+    }
+    return c.json(entries);
+  });
+
+  app.post('/conversations/:threadId/task-memory', async (c) => {
+    const threadId = c.req.param('threadId');
+    const data = z
+      .object({
+        name: z.string().trim().min(1).max(200),
+        summary: z.string().trim().min(1).max(500),
+        content: z.string().min(1).max(400_000),
+        kind: z.enum(['file', 'image', 'note']).optional(),
+        source: z.string().trim().max(300).nullable().optional(),
+      })
+      .safeParse(await c.req.json());
+    if (!data.success) {
+      return c.json(
+        { error: 'A task memory needs a name, summary, and content.' },
+        400,
+      );
+    }
+    try {
+      const saved = platform.workspace.saveTaskMemory(
+        threadId,
+        data.data.name,
+        data.data.summary,
+        data.data.content,
+        data.data.kind || 'note',
+        data.data.source ?? null,
+      );
+      return c.json(saved, 201);
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error ? error.message : 'Could not save task memory.',
+        },
+        404,
+      );
+    }
+  });
+
+  app.delete('/conversations/:threadId/task-memory/:id', (c) => {
+    const deleted = platform.workspace.deleteTaskMemory(c.req.param('id'));
+    return c.json({ deleted });
+  });
+
+  app.delete('/conversations/:threadId/task-memory', (c) => {
+    const threadId = c.req.param('threadId');
+    const count = platform.workspace.clearTaskMemory(threadId);
+    return c.json({ cleared: count });
+  });
+
   app.get('/dots/all', (c) => {
     return c.json(platform.workspace.dots());
   });
