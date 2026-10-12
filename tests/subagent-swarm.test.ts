@@ -44,7 +44,7 @@ function fixture() {
   return { store, workspace, dot, agent, input };
 }
 
-it('run_subagents accepts up to 50 tracks and the prompt teaches every command', async () => {
+it('run_subagents is uncapped in practice and the prompt teaches auto-escalation', async () => {
   const f = fixture();
   const network = vi
     .spyOn(globalThis, 'fetch')
@@ -59,7 +59,8 @@ it('run_subagents accepts up to 50 tracks and the prompt teaches every command',
   const schema = swarm.function.parameters as {
     properties: { agents: { maxItems?: number; minItems?: number } };
   };
-  expect(schema.properties.agents.maxItems).toBe(50);
+  // 200 is only a runaway-argument guard, not a practical limit.
+  expect(schema.properties.agents.maxItems).toBe(200);
   expect(schema.properties.agents.minItems).toBe(1);
 
   const system = JSON.stringify(request.messages ?? []);
@@ -83,6 +84,9 @@ it('run_subagents accepts up to 50 tracks and the prompt teaches every command',
   }
   // Anti-refusal discipline: the Dot must check tools before claiming absence.
   expect(system).toContain('Never say tools are unavailable');
-  // Hiring guidance reflects the raised capacity.
-  expect(system).toContain('up to 50 named tracks');
+  // Autonomous scaling: big tasks trigger the swarm without being asked.
+  expect(system).toContain('AUTONOMOUS SCALING');
+  expect(system).toContain('automatically fan out a run_subagents swarm');
+  // Swarm size is the agent's decision.
+  expect(system).toContain('swarm size is your decision');
 });

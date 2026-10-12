@@ -86,7 +86,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     command: '/subagents',
     name: 'Subagent Swarm',
     description:
-      'Hire up to 50 specialist subagents in parallel and merge results',
+      'Fan out a specialist subagent swarm — size is your/its call, auto or manual',
     category: 'tools',
   },
   {

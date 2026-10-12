@@ -1051,7 +1051,7 @@ export function Chat({
 
     if (trimmed.startsWith('/goal ')) {
       const goal = trimmed.slice(6).trim();
-      outgoing = `**Goal Mode Active**\nObjective: ${goal}\n\nPlease autonomously plan and execute all necessary steps, inspect tool evidence, verify completion, and do not stop until fully achieved.`;
+      outgoing = `**Goal Mode Active**\nObjective: ${goal}\n\nPlease autonomously plan and execute all necessary steps, inspect tool evidence, verify completion, and do not stop until fully achieved. If the goal is too big or too parallel for one pass, automatically fan out a run_subagents swarm (your call on size) and synthesize the results.`;
     } else if (trimmed.startsWith('/code ')) {
       const codeTask = trimmed.slice(6).trim();
       outgoing = `**Code Mode Active**\nTask: ${codeTask}\n\nPlease inspect the local project files, view or edit code using your str_replace_editor and bash tools, execute necessary commands (builds/tests), and verify the outcome.`;
@@ -1069,7 +1069,7 @@ export function Chat({
       outgoing = `**Undo Active**\n${note ? `Scope note: ${note}\n` : ''}Please inspect the most recent edits in the connected workspace (git status, git diff, and recent changes), show me a concise summary of what changed, and ask me to confirm before reverting. Only revert after my explicit approval.`;
     } else if (trimmed.startsWith('/subagents')) {
       const mission = trimmed.slice(11).trim();
-      outgoing = `**Swarm Mode Active**\nMission: ${mission || '(see conversation context)'}\n\nSplit this mission into independent parallel tracks (2-5 for focused work, up to 50 for broad sweeps — one file or area per track) and execute them with ONE run_subagents call (all tracks at once). Give each track a name and pick the right specialist agent profile for it (explore for read-only research, plan for planning, build or general for hands-on work). Then synthesize the merged per-track results into a single final answer with evidence.`;
+      outgoing = `**Swarm Mode Active**\nMission: ${mission || '(see conversation context)'}\n\nSplit this mission into independent parallel tracks and execute them with ONE run_subagents call (all tracks at once) — the swarm size is your decision: 2-5 tracks for focused work, dozens for broad sweeps with one file or area per track. Give each track a name and pick the right specialist agent profile for it (explore for read-only research, plan for planning, build or general for hands-on work). Then synthesize the merged per-track results into a single final answer with evidence.`;
     } else if (trimmed.startsWith('/search ')) {
       const q = trimmed.slice(8).trim();
       outgoing = `Please search the web for "${q}" and summarize findings with source citations.`;

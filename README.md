@@ -37,7 +37,7 @@ Current highlights:
 - **Spaces + Pages** — searchable library, visual editor, save conversation as page, review-before-save.
 - **Voice + calls, computer browser, Slack/Telegram** — realtime speech, isolated browser/workspace, channel SDKs.
 
-Slash commands: `/goal /code /plan /init /review /undo /subagents /compact /memory /model /tasks /new /mcp /schedule /search /browse /clear /help`. Each Dot can also hire up to 50 specialist subagents per call (`run_subagents`: explore, plan, build, or general profiles), knows every slash command and executes them directly on request, and manages its scheduled tasks end to end (`manage_schedule`: draft, start, list, pause, cancel).
+Slash commands: `/goal /code /plan /init /review /undo /subagents /compact /memory /model /tasks /new /mcp /schedule /search /browse /clear /help`. Each Dot can hire subagent swarms of any practical size (`run_subagents`: explore, plan, build, or general profiles; throttled execution, size is the agent's and owner's decision) and auto-escalates to a swarm on its own when a task is too big for one pass, knows every slash command and executes them directly on request, and manages its scheduled tasks end to end (`manage_schedule`: draft, start, list, pause, cancel).
 
 ## Get started
 
