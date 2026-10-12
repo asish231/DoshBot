@@ -1069,7 +1069,7 @@ export function Chat({
       outgoing = `**Undo Active**\n${note ? `Scope note: ${note}\n` : ''}Please inspect the most recent edits in the connected workspace (git status, git diff, and recent changes), show me a concise summary of what changed, and ask me to confirm before reverting. Only revert after my explicit approval.`;
     } else if (trimmed.startsWith('/subagents')) {
       const mission = trimmed.slice(11).trim();
-      outgoing = `**Swarm Mode Active**\nMission: ${mission || '(see conversation context)'}\n\nSplit this mission into 2-8 independent parallel tracks and execute them with ONE run_subagents call (all tracks at once). Give each track a name and pick the right specialist agent profile for it (explore for read-only research, plan for planning, build or general for hands-on work). Then synthesize the merged per-track results into a single final answer with evidence.`;
+      outgoing = `**Swarm Mode Active**\nMission: ${mission || '(see conversation context)'}\n\nSplit this mission into independent parallel tracks (2-5 for focused work, up to 50 for broad sweeps — one file or area per track) and execute them with ONE run_subagents call (all tracks at once). Give each track a name and pick the right specialist agent profile for it (explore for read-only research, plan for planning, build or general for hands-on work). Then synthesize the merged per-track results into a single final answer with evidence.`;
     } else if (trimmed.startsWith('/search ')) {
       const q = trimmed.slice(8).trim();
       outgoing = `Please search the web for "${q}" and summarize findings with source citations.`;
