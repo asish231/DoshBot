@@ -284,9 +284,9 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                           justifyContent: 'center',
                           gap: '8px',
                           padding: '6px 10px',
-                          background: 'rgba(255,255,255,0.05)',
+                          background: 'var(--lavender, rgba(255,255,255,0.05))',
                           fontSize: '12px',
-                          color: '#888',
+                          color: 'var(--muted, #888)',
                         }}
                       >
                         <span>Browser is on about:blank.</span>

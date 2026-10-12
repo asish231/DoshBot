@@ -963,8 +963,8 @@ export function WorkspaceDialog({
                     style={{
                       width: '100%',
                       padding: '8px 12px',
-                      background: 'rgba(255,255,255,0.06)',
-                      border: '1px solid rgba(255,255,255,0.12)',
+                      background: 'var(--surface, rgba(255,255,255,0.06))',
+                      border: '1px solid var(--line, rgba(255,255,255,0.12))',
                       borderRadius: 0,
                       color: 'inherit',
                       fontSize: '13px',
@@ -1598,7 +1598,7 @@ export function WorkspaceDialog({
                       style={{
                         marginBottom: '12px',
                         padding: '12px 14px',
-                        background: '#ffffff',
+                        background: 'var(--surface, #ffffff)',
                         border: '2px solid #000',
                         borderRadius: 0,
                       }}
@@ -1611,12 +1611,12 @@ export function WorkspaceDialog({
                           marginBottom: '4px',
                         }}
                       >
-                        <strong style={{ fontSize: '12px', color: '#1c1c1e' }}>
+                        <strong style={{ fontSize: '12px', color: 'var(--ink, #1c1c1e)' }}>
                           OpenCode Engine Connected
                         </strong>
                         <span
                           className="line-option-tag"
-                          style={{ color: '#4a6572' }}
+                          style={{ color: 'var(--muted, #4a6572)' }}
                         >
                           {opencodeStatus.freeModels?.length ?? 0} Free Models
                         </span>
@@ -1636,7 +1636,7 @@ export function WorkspaceDialog({
                           fontSize: '11.5px',
                         }}
                       >
-                        <span style={{ color: '#767986' }}>
+                        <span style={{ color: 'var(--muted, #767986)' }}>
                           Reasoning Variant:
                         </span>
                         <select
@@ -1646,7 +1646,7 @@ export function WorkspaceDialog({
                             padding: '3px 8px',
                             borderRadius: '6px',
                             border: '2px solid #000',
-                            background: '#ffffff',
+                            background: 'var(--surface, #ffffff)',
                             fontSize: '11px',
                           }}
                         >
@@ -1817,7 +1817,7 @@ export function WorkspaceDialog({
                     style={{
                       padding: '12px 14px',
                       borderRadius: 0,
-                      background: '#ffffff',
+                      background: 'var(--surface, #ffffff)',
                       border: '2px solid #000',
                       marginBottom: '16px',
                       display: 'flex',
@@ -1859,7 +1859,7 @@ export function WorkspaceDialog({
                     style={{
                       padding: '14px 16px',
                       borderRadius: 0,
-                      background: '#ffffff',
+                      background: 'var(--surface, #ffffff)',
                       border: '2px solid #000',
                       marginBottom: '16px',
                     }}
@@ -1880,7 +1880,7 @@ export function WorkspaceDialog({
                       </label>
                       <span
                         className="line-option-tag"
-                        style={{ color: '#4a6572' }}
+                        style={{ color: 'var(--muted, #4a6572)' }}
                       >
                         Local Filesystem
                       </span>
@@ -2101,7 +2101,7 @@ export function WorkspaceDialog({
                           padding: '6px 10px',
                           borderRadius: 0,
                           border: '2px solid #000',
-                          background: '#ffffff',
+                          background: 'var(--surface, #ffffff)',
                           fontSize: '11.5px',
                         }}
                       >
@@ -2140,7 +2140,7 @@ export function WorkspaceDialog({
                           padding: '6px 10px',
                           borderRadius: 0,
                           border: '2px solid #000',
-                          background: '#ffffff',
+                          background: 'var(--surface, #ffffff)',
                           fontSize: '11.5px',
                         }}
                       >
@@ -2156,7 +2156,7 @@ export function WorkspaceDialog({
                     style={{
                       padding: '14px 16px',
                       borderRadius: 0,
-                      background: '#ffffff',
+                      background: 'var(--surface, #ffffff)',
                       border: '2px solid #000',
                     }}
                   >
@@ -2199,7 +2199,7 @@ export function WorkspaceDialog({
                           fontSize: '11.5px',
                         }}
                       >
-                        <span style={{ color: '#767986' }}>
+                        <span style={{ color: 'var(--muted, #767986)' }}>
                           Reasoning Variant:
                         </span>
                         <select
@@ -2209,7 +2209,7 @@ export function WorkspaceDialog({
                             padding: '3px 8px',
                             borderRadius: '6px',
                             border: '2px solid #000',
-                            background: '#ffffff',
+                            background: 'var(--surface, #ffffff)',
                             fontSize: '11px',
                           }}
                         >
@@ -2312,7 +2312,7 @@ export function WorkspaceDialog({
                     style={{
                       padding: '14px 16px',
                       borderRadius: 0,
-                      background: '#ffffff',
+                      background: 'var(--surface, #ffffff)',
                       border: '2px solid #000',
                     }}
                   >
@@ -2360,7 +2360,7 @@ export function WorkspaceDialog({
                           style={{
                             width: '100%',
                             padding: '8px 10px',
-                            background: '#ffffff',
+                            background: 'var(--surface, #ffffff)',
                             border: '2px solid #000',
                             borderRadius: 0,
                             fontSize: '12px',
@@ -2396,7 +2396,7 @@ export function WorkspaceDialog({
                           style={{
                             width: '100%',
                             padding: '8px 10px',
-                            background: '#ffffff',
+                            background: 'var(--surface, #ffffff)',
                             border: '2px solid #000',
                             borderRadius: 0,
                             fontSize: '12px',
@@ -2450,7 +2450,7 @@ export function WorkspaceDialog({
                           style={{
                             width: '100%',
                             padding: '8px 10px',
-                            background: '#ffffff',
+                            background: 'var(--surface, #ffffff)',
                             border: '2px solid #000',
                             borderRadius: 0,
                             fontSize: '12px',
@@ -2524,7 +2524,7 @@ export function WorkspaceDialog({
                         Create Subagent
                       </button>
                       {dotCreatedMessage && (
-                        <span style={{ fontSize: '11px', color: '#4a6572' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--muted, #4a6572)' }}>
                           Subagent created
                         </span>
                       )}
@@ -2557,7 +2557,7 @@ export function WorkspaceDialog({
                         marginBottom: '6px',
                       }}
                     >
-                      <strong style={{ fontSize: '12px', color: '#1c1c1e' }}>
+                      <strong style={{ fontSize: '12px', color: 'var(--ink, #1c1c1e)' }}>
                         Global Workspace Memories
                       </strong>
                       <span className="line-option-tag">
@@ -2635,7 +2635,7 @@ export function WorkspaceDialog({
                           padding: '6px 10px',
                           borderRadius: 0,
                           border: '2px solid #000',
-                          background: '#ffffff',
+                          background: 'var(--surface, #ffffff)',
                           fontSize: '11px',
                         }}
                       >
@@ -2674,7 +2674,7 @@ export function WorkspaceDialog({
                         marginBottom: '6px',
                       }}
                     >
-                      <strong style={{ fontSize: '12px', color: '#1c1c1e' }}>
+                      <strong style={{ fontSize: '12px', color: 'var(--ink, #1c1c1e)' }}>
                         Active Session Memories (Scratchpad)
                       </strong>
                       <div
@@ -2693,7 +2693,7 @@ export function WorkspaceDialog({
                             padding: '3px 8px',
                             borderRadius: '6px',
                             border: '2px solid #000',
-                            background: '#ffffff',
+                            background: 'var(--surface, #ffffff)',
                             fontSize: '11px',
                             maxWidth: '160px',
                           }}
@@ -2797,7 +2797,7 @@ export function WorkspaceDialog({
                           padding: '6px 10px',
                           borderRadius: 0,
                           border: '2px solid #000',
-                          background: '#ffffff',
+                          background: 'var(--surface, #ffffff)',
                           fontSize: '11px',
                         }}
                       >
@@ -2895,7 +2895,8 @@ export function WorkspaceDialog({
                                 whiteSpace: 'pre-wrap',
                                 maxHeight: '220px',
                                 overflow: 'auto',
-                                background: 'rgba(0,0,0,0.03)',
+                                background: 'var(--lavender, rgba(0,0,0,0.03))',
+                                border: '1px solid var(--line, #e6e6ee)',
                                 padding: '8px',
                                 borderRadius: '6px',
                               }}
@@ -3535,7 +3536,7 @@ export function WorkspaceDialog({
                     style={{
                       padding: '12px 14px',
                       borderRadius: 0,
-                      background: '#ffffff',
+                      background: 'var(--surface, #ffffff)',
                       border: '2px solid #000',
                     }}
                   >
