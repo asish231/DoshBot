@@ -70,18 +70,26 @@ export function createApp({
     // Loopback dev convenience: the Vite dev server answers on both
     // localhost and 127.0.0.1, and the browser's Origin header follows
     // whichever name it was opened under — same machine, two names.
-    // Only relaxed when no explicit origin is configured (local dev).
-    const allowedOrigins = new Set([
-      expectedOrigin,
-      ...(origin
-        ? []
-        : [
-            'http://localhost:5173',
-            'http://127.0.0.1:5173',
-            'http://localhost:4310',
-            'http://127.0.0.1:4310',
-          ]),
-    ]);
+    // A configured loopback origin therefore accepts its sibling; remote
+    // origins stay strict, and foreign origins are still refused.
+    const allowedOrigins = new Set([expectedOrigin]);
+    try {
+      const expected = new URL(expectedOrigin);
+      const isLoopback =
+        expected.hostname === 'localhost' || expected.hostname === '127.0.0.1';
+      if (isLoopback) {
+        allowedOrigins.add(
+          `http://${expected.hostname === 'localhost' ? '127.0.0.1' : 'localhost'}:${expected.port}`,
+        );
+        if (expected.protocol === 'https:') {
+          allowedOrigins.add(
+            `https://${expected.hostname === 'localhost' ? '127.0.0.1' : 'localhost'}:${expected.port}`,
+          );
+        }
+      }
+    } catch {
+      /* non-URL origin string — strict comparison only */
+    }
     if (requestOrigin && !allowedOrigins.has(requestOrigin))
       return c.json({ error: 'Cross-origin requests are not allowed.' }, 403);
     if (c.req.header('sec-fetch-site') === 'cross-site')
