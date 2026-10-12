@@ -332,6 +332,47 @@ export function createApp({
     store.deleteUpload(c.req.param('id'))
       ? c.json({ ok: true })
       : c.json({ error: 'File not found.' }, 404),
+  );
+  app.get('/api/monitors', (c) => c.json(store.monitors()));
+  app.delete('/api/monitors/:id', (c) =>
+    store.deleteMonitor(c.req.param('id'))
+      ? c.json({ ok: true })
+      : c.json({ error: 'Monitor not found.' }, 404),
+  );
+  app.get('/api/artifacts', (c) =>
+    c.json(store.artifacts(c.req.query('threadId') || undefined)),
+  );
+  app.post('/api/artifacts', async (c) => {
+    const parsed = z
+      .object({
+        title: z.string().trim().min(1).max(200),
+        kind: z.enum(['markdown', 'code', 'text']),
+        language: z.string().trim().max(60).nullable().optional(),
+        content: z.string().min(1).max(200_000),
+        threadId: z.string().trim().max(100).nullable().optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json(
+        { error: 'An artifact needs a title, kind, and content.' },
+        400,
+      );
+    return c.json(
+      store.saveArtifact(
+        parsed.data.title,
+        parsed.data.kind,
+        parsed.data.content,
+        parsed.data.language ?? null,
+        parsed.data.threadId ?? null,
+      ),
+      201,
+    );
+  });
+  app.delete('/api/artifacts/:id', (c) =>
+    store.deleteArtifact(c.req.param('id'))
+      ? c.json({ ok: true })
+      : c.json({ error: 'Artifact not found.' }, 404),
   );  app.post('/api/memories/:id/links', async (c) => {
     const parsed = z
       .object({

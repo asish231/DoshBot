@@ -46,7 +46,13 @@ import {
   type ComputerToolRenderProps,
 } from './ComputerToolCard';
 import { ChatTranscript, isInternalVoiceReceipt } from './ChatTranscript';
-import type { CallReceipt, Conversation, Dot } from '../shared/types';
+import type {
+  Artifact,
+  CallReceipt,
+  Conversation,
+  Dot,
+} from '../shared/types';
+import ReactMarkdown from 'react-markdown';
 import { Mascot } from './Mascot';
 import { useVoice } from './useVoice';
 import { CallView } from './CallView';
@@ -248,6 +254,36 @@ export function Chat({
   const [contextError, setContextError] = useState('');
   const [contextAttempt, setContextAttempt] = useState(0);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  // Generative UI: artifacts the Dot creates render in a live side panel.
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const [selectedArtifactId, setSelectedArtifactId] = useState<
+    string | null
+  >(null);
+  const knownArtifactIds = useRef<Set<string>>(new Set());
+  const refreshArtifacts = () =>
+    void api<Artifact[]>(`/artifacts?threadId=${thread.id}`, 'GET')
+      .then((list) => {
+        setArtifacts(Array.isArray(list) ? list : []);
+        // Auto-open the panel when this turn created new artifacts.
+        const fresh = (list ?? []).filter(
+          (a) => !knownArtifactIds.current.has(a.id),
+        );
+        for (const a of list ?? []) knownArtifactIds.current.add(a.id);
+        if (fresh.length > 0 && list.length > 0) {
+          setSelectedArtifactId((current) => current ?? list[0]!.id);
+          setArtifactsOpen(true);
+        }
+      })
+      .catch(() => setArtifacts([]));
+  useEffect(() => {
+    knownArtifactIds.current = new Set();
+    setArtifacts([]);
+    setSelectedArtifactId(null);
+    setArtifactsOpen(false);
+    refreshArtifacts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread.id]);
   const contextReady = pageContext !== undefined;
   useEffect(() => {
     let active = true;
@@ -305,6 +341,11 @@ export function Chat({
   const [dirSaving, setDirSaving] = useState(false);
   const [browsePath, setBrowsePath] = useState('');
   const [browseParent, setBrowseParent] = useState('');
+  // Refresh artifacts after each turn so new panels appear without a reload.
+  useEffect(() => {
+    if (!running) refreshArtifacts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
   const [browseEntries, setBrowseEntries] = useState<
     Array<{ name: string; path: string }>
   >([]);
@@ -1363,6 +1404,18 @@ export function Chat({
           </span>
         </div>
         <div className="chat-persona-actions">
+          {artifacts.length > 0 && (
+            <button
+              type="button"
+              className={`token-meter-pill ${artifactsOpen ? 'active' : ''}`}
+              role="button"
+              aria-pressed={artifactsOpen}
+              title={`${artifacts.length} artifact(s) created in this chat. Click to open the panel.`}
+              onClick={() => setArtifactsOpen((open) => !open)}
+            >
+              <span className="token-meter-text">✦ {artifacts.length}</span>
+            </button>
+          )}
           {/* DSH Token Usage Meter Badge — per-session in/out tracking */}
           <div
             className={`token-meter-pill ${tokenUsage.status}`}
@@ -2438,6 +2491,121 @@ export function Chat({
           }
         }}
       />
+
+      {/* Generative UI: live artifact panel (docs/code the Dot created) */}
+      {artifactsOpen && (
+        <aside
+          className="artifact-drawer"
+          aria-label="Artifacts created in this chat"
+        >
+          <div className="artifact-drawer-header">
+            <span className="artifact-drawer-title">Artifacts</span>
+            <div className="artifact-drawer-actions">
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Refresh artifacts"
+                onClick={refreshArtifacts}
+              >
+                ⟳
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close artifacts"
+                onClick={() => setArtifactsOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          {artifacts.length > 1 && (
+            <div className="artifact-tabs" role="tablist">
+              {artifacts.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={
+                    (selectedArtifactId ?? artifacts[0]!.id) === a.id
+                  }
+                  className={`artifact-tab ${
+                    (selectedArtifactId ?? artifacts[0]!.id) === a.id
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() => setSelectedArtifactId(a.id)}
+                  title={a.title}
+                >
+                  {a.kind === 'code' ? '⌘' : a.kind === 'markdown' ? '📄' : '📝'}{' '}
+                  {a.title.length > 18 ? `${a.title.slice(0, 18)}…` : a.title}
+                </button>
+              ))}
+            </div>
+          )}
+          {(() => {
+            const active =
+              artifacts.find((a) => a.id === selectedArtifactId) ??
+              artifacts[0];
+            if (!active) return null;
+            return (
+              <div className="artifact-body">
+                <div className="artifact-meta">
+                  <strong>{active.title}</strong>
+                  <span>
+                    {active.kind}
+                    {active.language ? ` · ${active.language}` : ''} ·{' '}
+                    {new Date(active.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                {active.kind === 'markdown' ? (
+                  <div className="artifact-markdown">
+                    <ReactMarkdown>{active.content}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <pre className="artifact-code">
+                    <code>{active.content}</code>
+                  </pre>
+                )}
+                <div className="artifact-footer">
+                  <button
+                    type="button"
+                    className="artifact-copy"
+                    onClick={() =>
+                      void navigator.clipboard
+                        ?.writeText(active.content)
+                        .then(() => {
+                          setCompactMessage('Artifact copied to clipboard.');
+                          setTimeout(() => setCompactMessage(null), 2500);
+                        })
+                        .catch(() => undefined)
+                    }
+                  >
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    className="artifact-copy danger"
+                    onClick={() => {
+                      void api(`/artifacts/${active.id}`, 'DELETE').then(() => {
+                        const remaining = artifacts.filter(
+                          (a) => a.id !== active.id,
+                        );
+                        setArtifacts(remaining);
+                        knownArtifactIds.current.delete(active.id);
+                        setSelectedArtifactId(remaining[0]?.id ?? null);
+                        if (remaining.length === 0) setArtifactsOpen(false);
+                      });
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </aside>
+      )}
     </div>
   );
 }

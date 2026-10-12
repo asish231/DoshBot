@@ -18,6 +18,7 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Store } from './store.js';
 import { Runner } from './runner.js';
+import { MonitorService } from './monitors.js';
 import { createApp, type App } from './app.js';
 import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
@@ -96,6 +97,7 @@ const runner = new Runner(
     return { text, sources: [], sample: false };
   },
 );
+const monitors = new MonitorService(store, workspace);
 const wsOrigin = new URL(
   config.intelligenceWsUrl ?? 'wss://realtime.intelligence.copilotkit.ai',
 ).origin;
@@ -126,6 +128,7 @@ const telegram = new TelegramChannel(platform, {
 const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(`OpenDots template listening on http://${host}:${info.port}`);
   runner.start();
+  monitors.start();
   telegram.start();
   void platform
     .start()
@@ -140,6 +143,7 @@ attachGeminiLiveHandler(server, platform, { ownerToken, origin });
 const shutdown = createShutdown({
   stopRunner: () => {
     runner.stop();
+    monitors.stop();
     telegram.stop();
   },
   stopPlatform: () => platform.stop(),

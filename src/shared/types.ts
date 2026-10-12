@@ -109,6 +109,31 @@ export interface Upload {
   threadId?: string | null;
   createdAt: number;
 }
+/** Event-based site watcher: fetches a URL on an interval and fires a task in
+ *  the bound conversation when the content hash changes. */
+export interface Monitor {
+  id: string;
+  url: string;
+  threadId: string;
+  prompt: string;
+  intervalSeconds: number;
+  status: 'paused' | 'active';
+  lastHash?: string | null;
+  lastCheckedAt?: number | null;
+  lastError?: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+/** A doc or code panel the Dot created, rendered live in the chat UI. */
+export interface Artifact {
+  id: string;
+  threadId?: string | null;
+  title: string;
+  kind: 'markdown' | 'code' | 'text';
+  language?: string | null;
+  content: string;
+  createdAt: number;
+}
 export interface Detail {
   task: Task;
   runs: Run[];

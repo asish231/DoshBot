@@ -34,6 +34,8 @@ Current highlights:
 - **Ask questions** — `ask_question` human-in-the-loop cards (2–6 options, single/multi).
 - **Research** — `search_web` + `read_public_page` via Parallel, citations saved.
 - **24/7 scheduling** — server-side recurring tasks in their original conversation, pause/retry.
+- **Event-based site monitors** — a Dot drafts a URL watcher (`manage_monitor`, paused until you approve); the MonitorService hashes the page on its interval and fires a turn in that conversation only when the content actually changes — perfect for "watch this site and tell me when it updates".
+- **Generative UI artifacts** — when a Dot produces a doc, report, or code file, `create_artifact` renders it live in the chat's artifact panel (right side): rendered markdown, syntax-styled code, copy/delete, auto-opens on creation. No local folder needed — artifacts live on the server.
 - **Skills library** — reusable `SKILL.md` instruction files under `data/skills`; add them in Settings or via `/skills`, and Dots create skills for you on their own initiative (`create_skill`), load them before matching tasks (`read_skill`), and keep them current.
 - **Agent-spawned Dot team** — a Dot can create specialist Dots itself (`spawn_dot`), list the team (`list_dots`), and delegate full turns to any of them (`message_dot`, persistent per-pair conversation so specialists remember prior delegations). Created Dots are real workspace Dots you can chat with too.
 - **Binary uploads** — attach images and any binary data in chat (no image count limit, 50MB/file); files upload to the server (`POST /api/files`) and Dots push them into their computer for processing (`push_upload_to_computer`, binary-safe `contentsBase64` writes).

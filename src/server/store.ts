@@ -5,8 +5,10 @@ import { writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type {
   Action,
+  Artifact,
   Detail,
   Memory,
+  Monitor,
   Result,
   Run,
   Settings,
@@ -51,6 +53,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_links (fromId TEXT NOT NULL, toId TEXT NOT NULL, relation TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY (fromId, toId));
       CREATE TABLE IF NOT EXISTS uploads (id TEXT PRIMARY KEY, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, threadId TEXT, createdAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS monitors (id TEXT PRIMARY KEY, url TEXT NOT NULL, threadId TEXT NOT NULL, prompt TEXT NOT NULL, intervalSeconds INTEGER NOT NULL, status TEXT NOT NULL, lastHash TEXT, lastCheckedAt INTEGER, lastError TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS artifacts (id TEXT PRIMARY KEY, threadId TEXT, title TEXT NOT NULL, kind TEXT NOT NULL, language TEXT, content TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS tasks_due ON tasks(status, nextRunAt);
       CREATE INDEX IF NOT EXISTS runs_task ON runs(taskId, startedAt);
       CREATE INDEX IF NOT EXISTS events_task ON events(taskId, id);`);
@@ -467,5 +471,92 @@ export class Store {
     this.db.prepare('DELETE FROM uploads WHERE id=?').run(id);
     rmSync(join(this.uploadsDir, id), { force: true });
     return true;
+  }
+  /** Site monitors: event-based triggers that watch a URL and fire a turn in
+   *  the bound conversation when its content changes. */
+  createMonitor(
+    url: string,
+    threadId: string,
+    prompt: string,
+    intervalSeconds: number,
+  ): Monitor {
+    const id = randomUUID();
+    const now = Date.now();
+    this.db
+      .prepare(
+        "INSERT INTO monitors (id, url, threadId, prompt, intervalSeconds, status, lastHash, lastCheckedAt, lastError, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, 'paused', NULL, NULL, NULL, ?, ?)",
+      )
+      .run(id, url, threadId, prompt, intervalSeconds, now, now);
+    return this.monitor(id)!;
+  }
+  monitors(): Monitor[] {
+    return this.db
+      .prepare('SELECT * FROM monitors ORDER BY createdAt DESC')
+      .all() as unknown as Monitor[];
+  }
+  monitor(id: string): Monitor | undefined {
+    return this.db
+      .prepare('SELECT * FROM monitors WHERE id=?')
+      .get(id) as unknown as Monitor | undefined;
+  }
+  monitorAction(id: string, action: 'start' | 'pause'): Monitor | undefined {
+    this.db
+      .prepare(
+        "UPDATE monitors SET status=?, updatedAt=? WHERE id=?",
+      )
+      .run(action === 'start' ? 'active' : 'paused', Date.now(), id);
+    return this.monitor(id);
+  }
+  recordMonitorCheck(
+    id: string,
+    hash: string | null,
+    error: string | null,
+  ): void {
+    this.db
+      .prepare(
+        'UPDATE monitors SET lastHash=COALESCE(?, lastHash), lastCheckedAt=?, lastError=?, updatedAt=? WHERE id=?',
+      )
+      .run(hash, Date.now(), error, Date.now(), id);
+  }
+  deleteMonitor(id: string): boolean {
+    return this.db.prepare('DELETE FROM monitors WHERE id=?').run(id).changes > 0;
+  }
+  /** In-chat artifacts: docs and code the Dot creates that render live in the
+   *  chat's artifact panel — no local folder involved. */
+  saveArtifact(
+    title: string,
+    kind: 'markdown' | 'code' | 'text',
+    content: string,
+    language: string | null,
+    threadId: string | null,
+  ): Artifact {
+    const id = randomUUID();
+    this.db
+      .prepare(
+        'INSERT INTO artifacts (id, threadId, title, kind, language, content, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(id, threadId, title, kind, language, content, Date.now());
+    return this.artifact(id)!;
+  }
+  artifacts(threadId?: string): Artifact[] {
+    return threadId
+      ? (this.db
+          .prepare(
+            'SELECT * FROM artifacts WHERE threadId=? ORDER BY createdAt DESC',
+          )
+          .all(threadId) as unknown as Artifact[])
+      : (this.db
+          .prepare('SELECT * FROM artifacts ORDER BY createdAt DESC')
+          .all() as unknown as Artifact[]);
+  }
+  artifact(id: string): Artifact | undefined {
+    return this.db
+      .prepare('SELECT * FROM artifacts WHERE id=?')
+      .get(id) as unknown as Artifact | undefined;
+  }
+  deleteArtifact(id: string): boolean {
+    return (
+      this.db.prepare('DELETE FROM artifacts WHERE id=?').run(id).changes > 0
+    );
   }
 }
