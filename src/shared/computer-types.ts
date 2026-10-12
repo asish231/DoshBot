@@ -107,18 +107,18 @@ export type ComputerAction = keyof typeof computerInputs;
 
 export const COMPUTER_ENVIRONMENTS = [
   {
+    id: 'mini-linux',
+    name: 'Alpine Linux (Active)',
+    tag: 'Alpine · Fast Boot',
+    desc: 'Ultra-compact micro Linux with minimal RAM footprint for fast, low-resource command execution and Chromium.',
+    memory: 'Micro (2GB Footprint)',
+  },
+  {
     id: 'ubuntu',
-    name: 'Ubuntu 24.04 LTS (Default)',
+    name: 'Ubuntu 24.04 LTS',
     tag: 'Full Desktop',
     desc: 'Containerized desktop environment with Chromium browser, bash shell, and supervisor tools.',
     memory: 'Standard (4GB–8GB)',
-  },
-  {
-    id: 'mini-linux',
-    name: 'Mini Linux (Alpine 2GB)',
-    tag: 'Micro · Fast Boot',
-    desc: 'Ultra-compact micro Linux with minimal 2GB RAM footprint for fast, low-resource command execution.',
-    memory: 'Micro (2GB Footprint)',
   },
   {
     id: 'arch',

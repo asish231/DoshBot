@@ -179,9 +179,53 @@ export class Platform {
         throw error;
       }
     }
+    if (this.computers.configured) {
+      for (const dot of this.workspace.dots()) {
+        const policy = this.workspace.computers.permissions(dot.id);
+        if (policy.enabled) {
+          try {
+            await this.computers.start(dot.id);
+            if (policy.browser) {
+              try {
+                const snap = (await this.computers.action(
+                  dot.id,
+                  'snapshot',
+                  {},
+                  'owner',
+                )) as { url?: string };
+                if (!snap?.url || snap.url === 'about:blank') {
+                  await this.computers.action(
+                    dot.id,
+                    'navigate',
+                    { url: 'https://example.com' },
+                    'owner',
+                  );
+                }
+              } catch {
+                /* Non-fatal: browser may still be booting */
+              }
+            }
+          } catch {
+            /* Non-fatal if supervisor is still booting or offline */
+          }
+        }
+      }
+    }
   }
   async stop() {
     await this.handler?.channels?.stop();
+    if (this.computers.configured) {
+      for (const dot of this.workspace.dots()) {
+        const policy = this.workspace.computers.permissions(dot.id);
+        if (policy.enabled) {
+          try {
+            await this.computers.stop(dot.id);
+          } catch {
+            /* Non-fatal */
+          }
+        }
+      }
+    }
   }
   async createConversation(dotId: string, title: string) {
     this.requireReady();

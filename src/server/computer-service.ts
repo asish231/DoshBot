@@ -344,6 +344,19 @@ export class ComputerService {
         const url = await this.running(id, activeSignal);
         this.allowed(id, kind, actor);
         activeSignal.throwIfAborted();
+        if (actor === 'owner' && action === 'navigate') {
+          try {
+            await this.json(
+              `${url}/snapshot`,
+              this.token(id),
+              {},
+              activeSignal,
+              id,
+            );
+          } catch {
+            /* Non-fatal */
+          }
+        }
         const path = action
           .replace(/^files_/, 'files/')
           .replace(/^human_/, 'human/');

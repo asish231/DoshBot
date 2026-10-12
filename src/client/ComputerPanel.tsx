@@ -85,6 +85,7 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
       }
     } catch (cause) {
       if (current()) {
+        if (cause instanceof Error && cause.name === 'AbortError') return;
         setError(
           cause instanceof Error
             ? cause.message
@@ -101,14 +102,14 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
-      if (
-        !document.hidden &&
-        !lifecycle.current.busy &&
-        (!lifecycle.current.loaded || lifecycle.current.running)
-      )
+      if (!document.hidden && !lifecycle.current.busy) {
         await refresh();
+      }
       if (!cancelled && lifecycle.current.active)
-        timer = setTimeout(() => void poll(), 4000);
+        timer = setTimeout(
+          () => void poll(),
+          lifecycle.current.running ? 3000 : 4000,
+        );
     };
     void poll();
     return () => {
@@ -145,10 +146,13 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
       await refresh();
       return result;
     } catch (cause) {
-      if (lifecycle.current.active)
+      if (lifecycle.current.active) {
+        if (cause instanceof Error && cause.name === 'AbortError') return;
         setError(
           cause instanceof Error ? cause.message : 'Computer action failed.',
         );
+        void refresh();
+      }
     } finally {
       lifecycle.current.busy = false;
       if (lifecycle.current.active) setBusy(false);
@@ -241,19 +245,24 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                   className="computer-row"
                   onSubmit={(event) => {
                     event.preventDefault();
-                    void action('navigate', { url });
+                    const target = url.trim() || (screen?.url && screen.url !== 'about:blank' ? screen.url : 'https://example.com');
+                    setUrl(target);
+                    void action('navigate', { url: target });
                   }}
                 >
                   <input
                     type="url"
                     aria-label="Browser URL"
-                    placeholder="https://example.com"
+                    placeholder={
+                      screen?.url && screen.url !== 'about:blank'
+                        ? screen.url
+                        : 'https://example.com'
+                    }
                     value={url}
                     onChange={(event) => setUrl(event.target.value)}
-                    required
                     disabled={!browser || busy || human}
                   />
-                  <button disabled={!browser || busy || human || !url.trim()}>
+                  <button disabled={!browser || busy || human}>
                     Go
                   </button>
                 </form>
@@ -267,6 +276,39 @@ export function ComputerPanel({ dot }: { dot: Dot }) {
                     <div className="computer-current-url" title={screen.url}>
                       {screen.url || 'Browser screen'}
                     </div>
+                    {screen.url === 'about:blank' && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          padding: '6px 10px',
+                          background: 'rgba(255,255,255,0.05)',
+                          fontSize: '12px',
+                          color: '#888',
+                        }}
+                      >
+                        <span>Browser is on about:blank.</span>
+                        <button
+                          type="button"
+                          disabled={!browser || busy || human}
+                          onClick={() => {
+                            setUrl('https://example.com');
+                            void action('navigate', {
+                              url: 'https://example.com',
+                            });
+                          }}
+                          style={{
+                            fontSize: '11px',
+                            padding: '2px 8px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Load example.com
+                        </button>
+                      </div>
+                    )}
                     <button
                       className="computer-screen"
                       aria-label={

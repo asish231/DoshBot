@@ -24,3 +24,6 @@ reference/
 
 # Playwright CLI session artifacts
 .playwright-cli/
+
+# Computer apk package cache
+deployment/computers/cache-apks/
