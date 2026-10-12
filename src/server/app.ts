@@ -67,7 +67,22 @@ export function createApp({
       return c.json({ error: 'Unrecognized host.' }, 403);
     const requestOrigin = c.req.header('origin');
     const expectedOrigin = origin ?? new URL(c.req.url).origin;
-    if (requestOrigin && requestOrigin !== expectedOrigin)
+    // Loopback dev convenience: the Vite dev server answers on both
+    // localhost and 127.0.0.1, and the browser's Origin header follows
+    // whichever name it was opened under — same machine, two names.
+    // Only relaxed when no explicit origin is configured (local dev).
+    const allowedOrigins = new Set([
+      expectedOrigin,
+      ...(origin
+        ? []
+        : [
+            'http://localhost:5173',
+            'http://127.0.0.1:5173',
+            'http://localhost:4310',
+            'http://127.0.0.1:4310',
+          ]),
+    ]);
+    if (requestOrigin && !allowedOrigins.has(requestOrigin))
       return c.json({ error: 'Cross-origin requests are not allowed.' }, 403);
     if (c.req.header('sec-fetch-site') === 'cross-site')
       return c.json({ error: 'Cross-site requests are not allowed.' }, 403);

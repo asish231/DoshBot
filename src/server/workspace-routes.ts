@@ -628,6 +628,35 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       );
     }
   });
+  // /btw: a side question answered in a throwaway conversation with the same
+  // Dot, deleted afterwards — this chat's context is never touched.
+  app.post('/conversations/:threadId/btw', async (c) => {
+    const data = z
+      .object({ question: z.string().trim().min(1).max(8000) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!data.success)
+      return c.json(
+        { error: 'Add a question after /btw (1-8000 chars).' },
+        400,
+      );
+    try {
+      const reply = await platform.askSideQuestion(
+        c.req.param('threadId'),
+        data.data.question,
+        AbortSignal.timeout(180_000),
+      );
+      return c.json({ reply });
+    } catch (e) {
+      return c.json(
+        {
+          error:
+            (e instanceof Error && e.message) || 'The side question failed.',
+        },
+        500,
+      );
+    }
+  });
   app.delete('/conversations', (c) => {
     const dotId = c.req.query('dotId');
     const threads = platform.workspace.conversations();

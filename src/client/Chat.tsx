@@ -213,6 +213,82 @@ const EFFORT_LEVELS = [
   { id: 'max', label: 'Max', desc: 'Maximum reasoning token budget' },
 ];
 
+/**
+ * Floating "Add to chat" action for text selected inside the transcript.
+ * Selecting a passage pops a small quote button; clicking it drops the
+ * selection into the composer as a markdown quote ready to ask about.
+ */
+function SelectionQuoteMenu({ onQuote }: { onQuote: (text: string) => void }) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const textRef = useRef('');
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    const update = () => {
+      const selection = window.getSelection();
+      if (
+        !selection ||
+        selection.isCollapsed ||
+        selection.rangeCount === 0
+      ) {
+        setPos(null);
+        return;
+      }
+      const selected = selection.toString().trim();
+      const anchor = selection.anchorNode;
+      const element =
+        anchor?.nodeType === Node.ELEMENT_NODE
+          ? (anchor as Element)
+          : (anchor?.parentElement ?? null);
+      // Only selections made inside the transcript — not the composer or UI.
+      if (
+        !selected ||
+        selected.length > 4000 ||
+        !element?.closest('.chat-transcript')
+      ) {
+        setPos(null);
+        return;
+      }
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      setPos({
+        top: Math.max(8, rect.top - 38),
+        left: Math.min(Math.max(8, rect.left), window.innerWidth - 180),
+      });
+      textRef.current = selected;
+    };
+    const debounced = () => {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(update, 150);
+    };
+    document.addEventListener('selectionchange', debounced);
+    const hide = () => setPos(null);
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+    return () => {
+      document.removeEventListener('selectionchange', debounced);
+      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('resize', hide);
+      clearTimeout(timer.current);
+    };
+  }, []);
+  if (!pos) return null;
+  return (
+    <button
+      type="button"
+      className="selection-quote-btn"
+      style={{ top: pos.top, left: pos.left }}
+      // preventDefault keeps the text selected until the quote is applied.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => {
+        onQuote(textRef.current);
+        setPos(null);
+        window.getSelection()?.removeAllRanges();
+      }}
+    >
+      ＋ Add to chat
+    </button>
+  );
+}
+
 export function Chat({
   thread,
   dot,
@@ -256,6 +332,11 @@ export function Chat({
   const [contextError, setContextError] = useState('');
   const [contextAttempt, setContextAttempt] = useState(0);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  // /btw side answers: shown as an ephemeral card, never in chat context.
+  const [btw, setBtw] = useState<{ question: string; reply: string } | null>(
+    null,
+  );
+  const [btwRunning, setBtwRunning] = useState(false);
   // Generative UI: artifacts the Dot creates render in a live side panel.
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
@@ -509,6 +590,37 @@ export function Chat({
       setTimeout(() => setCompactMessage(null), 3000);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not revert the chat.');
+    }
+  };
+
+  // Quote a passage selected in the transcript into the composer.
+  const quoteSelection = (text: string) => {
+    const quoted = text
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n');
+    setDraft((prev) =>
+      prev.trim() ? `${prev}\n\n${quoted}\n\n` : `${quoted}\n\n`,
+    );
+    textareaRef.current?.focus();
+  };
+
+  // /btw: a side question answered in a throwaway conversation; the reply
+  // shows in this chat as an ephemeral card and never enters its context.
+  const askBtw = async (question: string) => {
+    setBtwRunning(true);
+    setError('');
+    try {
+      const res = await api<{ reply: string }>(
+        `/conversations/${thread.id}/btw`,
+        'POST',
+        { question },
+      );
+      setBtw({ question, reply: res.reply });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'The side question failed.');
+    } finally {
+      setBtwRunning(false);
     }
   };
 
@@ -1104,6 +1216,16 @@ export function Chat({
       (hasAttachments
         ? `Please review the attached file(s): ${attachments.map((a) => a.name).join(', ')}`
         : '');
+    if (trimmed.startsWith('/btw')) {
+      const question = trimmed.slice(4).trim();
+      setDraft('');
+      if (!question) {
+        setError('Add your question after /btw, e.g. /btw what is the deploy command?');
+        return;
+      }
+      void askBtw(question);
+      return;
+    }
     if (trimmed === '/compact') {
       void handleCompact();
       return;
@@ -1248,7 +1370,7 @@ export function Chat({
       const url = trimmed.slice(8).trim();
       outgoing = `Please navigate to ${url} using your computer browser tool and inspect the page content.`;
     } else if (trimmed === '/help') {
-      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /init, /review, /undo, /subagents, /skills, /compact, /memory, /model, /tasks, /new, /mcp, /schedule, /search, /browse, /clear) and explain briefly how to use each.`;
+      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /init, /review, /undo, /subagents, /skills, /compact, /memory, /btw, /model, /tasks, /new, /mcp, /schedule, /search, /browse, /clear) and explain briefly how to use each.`;
     }
 
     const attachmentContext = await buildAttachmentContext();
@@ -1785,6 +1907,40 @@ export function Chat({
         dot={dot}
         voice={voice}
       />
+      <SelectionQuoteMenu onQuote={quoteSelection} />
+      {(btwRunning || btw) && (
+        <div className="btw-card" role="complementary" aria-label="Side answer">
+          <div className="btw-header">
+            <span className="btw-badge">BTW</span>
+            <span className="btw-title">
+              Answered on the side — this chat's context is untouched
+            </span>
+            {btw && (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Dismiss side answer"
+                title="Delete this side answer"
+                onClick={() => setBtw(null)}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          {btw ? (
+            <>
+              <p className="btw-question">{btw.question}</p>
+              <div className="btw-reply">
+                <ReactMarkdown>{btw.reply}</ReactMarkdown>
+              </div>
+            </>
+          ) : (
+            <p className="btw-loading" role="status">
+              Asking on the side… (a throwaway session handles it)
+            </p>
+          )}
+        </div>
+      )}
       <form
         className="chat-composer"
         onSubmit={(e) => {

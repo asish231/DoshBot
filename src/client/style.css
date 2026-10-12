@@ -8279,3 +8279,108 @@ copilotkit-web-inspector,
     transition: none;
   }
 }
+
+/* ==========================================================================
+   Selection → "Add to chat" floating action, and the /btw side-answer card.
+   ========================================================================== */
+.selection-quote-btn {
+  position: fixed;
+  z-index: 80;
+  border: 1px solid var(--line, #e6e6ee);
+  background: var(--surface, #ffffff);
+  color: var(--ink, #16161d);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(15, 15, 19, 0.16);
+}
+.selection-quote-btn:hover {
+  border-color: var(--blue, #2f6bff);
+  color: var(--blue, #2f6bff);
+}
+.selection-quote-btn:focus-visible {
+  outline: 2px solid var(--blue, #2f6bff);
+  outline-offset: 2px;
+}
+[data-theme='dark'] .selection-quote-btn {
+  background: #1d1d24;
+  border-color: #3a3a46;
+  color: #e8e9ee;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+.btw-card {
+  border: 1px solid var(--line, #e6e6ee);
+  border-left: 3px solid var(--blue, #2f6bff);
+  background: var(--surface, #ffffff);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+}
+.btw-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.btw-badge {
+  background: var(--blue, #2f6bff);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+[data-theme='dark'] .btw-badge {
+  color: #0f0f13;
+}
+.btw-title {
+  font-size: 11px;
+  color: var(--muted, #6b6b78);
+  flex: 1;
+}
+.btw-question {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink, #16161d);
+  margin: 0 0 6px;
+}
+.btw-reply {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink, #16161d);
+  max-height: 300px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.btw-reply pre {
+  background: var(--lavender, #f2f2f7);
+  border: 1px solid var(--line, #e6e6ee);
+  border-radius: 8px;
+  padding: 8px;
+  overflow: auto;
+}
+.btw-loading {
+  font-size: 13px;
+  color: var(--muted, #6b6b78);
+  margin: 0;
+}
+[data-theme='dark'] .btw-card {
+  background: #17171d;
+  border-color: #3a3a46;
+}
+[data-theme='dark'] .btw-question,
+[data-theme='dark'] .btw-reply {
+  color: #e8e9ee;
+}
+[data-theme='dark'] .btw-title,
+[data-theme='dark'] .btw-loading {
+  color: #9a9ba6;
+}
+[data-theme='dark'] .btw-reply pre {
+  background: #1d1d24;
+  border-color: #3a3a46;
+}

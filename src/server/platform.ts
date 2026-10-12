@@ -342,4 +342,30 @@ export class Platform {
       metadata,
     );
   }
+  /**
+   * A side question (/btw): answered in a throwaway conversation bound to
+   * the same Dot, then deleted. The calling conversation's context is never
+   * touched — the question and answer exist only in the ephemeral thread,
+   * which is removed even when the turn fails.
+   */
+  async askSideQuestion(
+    threadId: string,
+    question: string,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const thread = this.workspace.requireThread(threadId);
+    const tempId = `btw-${randomUUID()}`;
+    this.workspace.bindThread(
+      tempId,
+      thread.dotId,
+      `BTW: ${question.slice(0, 80)}`,
+    );
+    try {
+      return await this.turn(tempId, question, signal, {
+        opendotsSource: 'btw',
+      });
+    } finally {
+      this.workspace.deleteThread(tempId);
+    }
+  }
 }

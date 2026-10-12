@@ -64,6 +64,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     category: 'execution',
   },
   {
+    id: 'btw',
+    command: '/btw',
+    name: 'Side Question',
+    description:
+      'Ask a quick side question — answered in a throwaway session; this chat stays untouched',
+    placeholder: '/btw ',
+    category: 'context',
+  },
+  {
     id: 'compact',
     command: '/compact',
     name: 'Compact Context',
