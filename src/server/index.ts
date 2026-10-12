@@ -37,6 +37,7 @@ if (
 const database = process.env.DATABASE_PATH ?? 'data/opendots.sqlite';
 const store = new Store(database, {
   skillsDir: process.env.SKILLS_DIR ?? 'data/skills',
+  uploadsDir: process.env.UPLOADS_DIR ?? 'data/uploads',
 });
 const workspace = new WorkspaceStore(
   database,

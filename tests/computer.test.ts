@@ -165,8 +165,14 @@ it('rejects foreign targets, nonexistent Dots, traversal, unexpected inputs and 
     'a\0b',
   ])
     expect(computerInputs.files_read.safeParse({ path }).success).toBe(false);
+  // The exec ceiling is 300000: long enough for package installs, and the
+  // computer's own shell caps at 600000 on its side.
   expect(
-    computerInputs.exec.safeParse({ command: 'pwd', timeoutMs: 60001 }).success,
+    computerInputs.exec.safeParse({ command: 'pwd', timeoutMs: 300000 }).success,
+  ).toBe(true);
+  expect(
+    computerInputs.exec.safeParse({ command: 'pwd', timeoutMs: 300001 })
+      .success,
   ).toBe(false);
   expect(
     computerInputs.read.safeParse({ url: 'http://elsewhere' }).success,

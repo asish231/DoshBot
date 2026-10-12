@@ -57,6 +57,32 @@ describe("reading and writing inside the workspace", () => {
     expect(read.truncated).toBe(false);
   });
 
+  test("writes binary exactly, via base64, without corrupting a byte", async () => {
+    const ws = workspace();
+    // Every byte value, so any UTF-8 laundering shows up as a diff.
+    const bytes = Buffer.from(
+      Array.from({ length: 512 }, (_, i) => (i * 37) % 256),
+    );
+    const written = await ws.write("payload.bin", bytes.toString("base64"), {
+      base64: true,
+    });
+    expect(written.bytes).toBe(bytes.byteLength);
+
+    const read = await readFile(join(root, "payload.bin"));
+    expect(read.equals(bytes)).toBe(true);
+  });
+
+  test("rejects a base64 write whose decoded size passes the limit", async () => {
+    const ws = createWorkspace(root, { readBytes: 1000, writeBytes: 16, listEntries: 10 });
+    const big = Buffer.alloc(64, 1).toString("base64");
+    try {
+      await ws.write("too-big.bin", big, { base64: true });
+      throw new Error("expected the oversized write to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkspaceFileError);
+    }
+  });
+
   test("creates parent directories inside the workspace", async () => {
     const ws = workspace();
     await ws.write("reports/august/summary.csv", "a,b\n1,2\n");

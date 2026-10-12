@@ -81,14 +81,36 @@ export const computerInputs = {
   files_write: z
     .object({
       path: path.refine((p) => p.length > 0),
-      contents: z.string().max(100000),
+      contents: z.string().max(100000).optional(),
+      contentsBase64: z
+        .string()
+        .max(1500000)
+        .optional()
+        .describe(
+          'Binary-safe contents (base64). Use for images, archives, and any non-text data. Provide exactly one of contents or contentsBase64.',
+        ),
       append: z.boolean().optional(),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (input) =>
+        (input.contents !== undefined) !== (input.contentsBase64 !== undefined),
+      {
+        message: 'Provide exactly one of contents or contentsBase64.',
+      },
+    ),
   exec: z
     .object({
       command: z.string().trim().min(1).max(8000),
-      timeoutMs: z.number().int().min(1000).max(60000).default(30000),
+      timeoutMs: z
+        .number()
+        .int()
+        .min(1000)
+        .max(300000)
+        .default(30000)
+        .describe(
+          'Up to 300000 (5 minutes): long enough for package installs and builds.',
+        ),
     })
     .strict(),
   human_click: z

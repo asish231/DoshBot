@@ -100,6 +100,15 @@ export interface SessionMemory {
   category?: MemoryCategory | string | null;
   createdAt: number;
 }
+/** A file uploaded by the owner: metadata here, bytes on the server's disk. */
+export interface Upload {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  threadId?: string | null;
+  createdAt: number;
+}
 export interface Detail {
   task: Task;
   runs: Run[];

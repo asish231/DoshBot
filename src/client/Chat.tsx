@@ -66,6 +66,8 @@ interface ChatAttachment {
   kind: 'image' | 'text' | 'file';
   textContent?: string;
   dataUrl?: string;
+  /** Original bytes, kept so binaries upload intact to the server. */
+  file?: File;
 }
 
 function isImageMime(mime: string, name: string): boolean {
@@ -716,11 +718,13 @@ export function Chat({
     forceImage = false,
   ) => {
     if (!files || files.length === 0) return;
-    const list = Array.from(files).slice(0, 8);
+    // No count limit on images; a generous total cap keeps one click from
+    // staging the whole disk. The server enforces 50MB per file on upload.
+    const list = Array.from(files).slice(0, 64);
     const next: ChatAttachment[] = [];
     for (const file of list) {
-      if (file.size > 8 * 1024 * 1024) {
-        setError(`"${file.name}" exceeds 8MB and was skipped.`);
+      if (file.size > 50 * 1024 * 1024) {
+        setError(`"${file.name}" exceeds 50MB and was skipped.`);
         continue;
       }
       const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -739,6 +743,7 @@ export function Chat({
           size: file.size,
           kind: 'image',
           dataUrl,
+          file,
         });
       } else if (isTextReadable(mime, file.name) && file.size < 1024 * 1024) {
         const textContent = await file.text().catch(() => '');
@@ -749,6 +754,7 @@ export function Chat({
           size: file.size,
           kind: 'text',
           textContent: textContent.slice(0, 60000),
+          file,
         });
       } else if (mime === 'application/pdf' || /\.pdf$/i.test(file.name)) {
         next.push({
@@ -757,30 +763,69 @@ export function Chat({
           mime: mime === 'application/octet-stream' ? 'application/pdf' : mime,
           size: file.size,
           kind: 'file',
+          file,
         });
       } else {
-        next.push({ id, name: file.name, mime, size: file.size, kind: 'file' });
+        next.push({
+          id,
+          name: file.name,
+          mime,
+          size: file.size,
+          kind: 'file',
+          file,
+        });
       }
     }
     if (next.length) {
-      setAttachments((prev) => [...prev, ...next].slice(0, 6));
+      setAttachments((prev) => [...prev, ...next].slice(0, 64));
       setAttachMenuOpen(false);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (imageInputRef.current) imageInputRef.current.value = '';
   };
 
-  const buildAttachmentContext = (): string => {
+  const buildAttachmentContext = async (): Promise<string> => {
     if (attachments.length === 0) return '';
+    // Upload every attachment that still has its original bytes so the Dot
+    // can process binaries (list_uploads / push_upload_to_computer). Text and
+    // image previews continue to inline as before.
+    const uploadIds = new Map<string, string>();
+    const toUpload = attachments.filter(
+      (a): a is ChatAttachment & { file: File } => a.file !== undefined,
+    );
+    if (toUpload.length > 0) {
+      try {
+        const form = new FormData();
+        for (const a of toUpload) form.append('file', a.file, a.name);
+        form.append('threadId', thread.id);
+        const res = await api<{ uploads: Array<{ id: string; name: string }> }>(
+          '/files',
+          'POST',
+          form,
+        );
+        if (res?.uploads) {
+          res.uploads.forEach((u, i) => {
+            const attachment = toUpload[i];
+            if (attachment) uploadIds.set(attachment.id, u.id);
+          });
+        }
+      } catch (e) {
+        console.warn('[Chat] Attachment upload failed:', e);
+      }
+    }
     const parts: string[] = ['\n\n--- Attached files ---'];
     for (const a of attachments) {
+      const uploadRef = uploadIds.get(a.id);
+      const uploadNote = uploadRef
+        ? ` Uploaded as id ${uploadRef}: call push_upload_to_computer with uploadId "${uploadRef}" to place it in your computer workspace for processing.`
+        : '';
       if (a.kind === 'image' && a.dataUrl) {
         // Never truncate base64 — a sliced data URL is an unreadable image.
         // Vision models (GPT-4o, Gemini, deepseek-flash, OpenCode vision models)
         // read the markdown image below; text-only models (deepseek-chat/reasoner)
         // should ask the user for a description instead of guessing.
         parts.push(
-          `\n[Attached image: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB)]\n![${a.name}](${a.dataUrl})`,
+          `\n[Attached image: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB)]${uploadNote}\n![${a.name}](${a.dataUrl})`,
         );
       } else if (a.kind === 'text' && a.textContent !== undefined) {
         const truncated =
@@ -788,15 +833,15 @@ export function Chat({
             ? '\n[content truncated at 60000 chars — ask for the connected folder path to read the rest via str_replace_editor]'
             : '';
         parts.push(
-          `\n[Attached file: ${a.name}]\n\`\`\`\n${a.textContent}\n\`\`\`${truncated}`,
+          `\n[Attached file: ${a.name}]${uploadNote}\n\`\`\`\n${a.textContent}\n\`\`\`${truncated}`,
         );
       } else if (/pdf$/i.test(a.mime) || /\.pdf$/i.test(a.name)) {
         parts.push(
-          `\n[Attached file: ${a.name} (PDF, ${Math.round(a.size / 1024)}KB) — text was not inlined. If the file lives in the connected coding workspace, read it with str_replace_editor view or bash; otherwise ask the user to paste the relevant text or connect the folder.]`,
+          `\n[Attached file: ${a.name} (PDF, ${Math.round(a.size / 1024)}KB) — text was not inlined.${uploadRef ? ` Process it in your computer: push_upload_to_computer uploadId "${uploadRef}", then extract text with exec (e.g. a Python script or apk add poppler-utils for pdftotext).` : ' If the file lives in the connected coding workspace, read it with str_replace_editor view or bash.'}]`,
         );
       } else {
         parts.push(
-          `\n[Attached file: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB) — binary or too large to inline. If it lives in the connected coding workspace, inspect it with str_replace_editor view / bash; otherwise ask the user to paste the relevant excerpt or connect the folder.]`,
+          `\n[Attached file: ${a.name} (${a.mime}, ${Math.round(a.size / 1024)}KB) — binary.${uploadRef ? ` It is uploaded as id ${uploadRef}: use push_upload_to_computer to place it in your computer workspace, then analyze it there with exec (install tools first if needed, e.g. apk add python3 py3-pip).` : ' If it lives in the connected coding workspace, inspect it with str_replace_editor view / bash.'}]`,
         );
       }
     }
@@ -1096,7 +1141,7 @@ export function Chat({
       outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /init, /review, /undo, /subagents, /skills, /compact, /memory, /model, /tasks, /new, /mcp, /schedule, /search, /browse, /clear) and explain briefly how to use each.`;
     }
 
-    const attachmentContext = buildAttachmentContext();
+    const attachmentContext = await buildAttachmentContext();
     if (attachmentContext) {
       outgoing = `${outgoing}${attachmentContext}`;
     }

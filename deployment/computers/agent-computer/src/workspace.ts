@@ -281,29 +281,47 @@ export function createWorkspace(
       };
     },
 
-    /** Write a text file, creating parent directories inside the workspace as needed. */
+    /** Write a text or binary file, creating parent directories inside the workspace as needed. */
     async write(
       requested: string,
       contents: string,
-      options: { append?: boolean } = {},
+      options: { append?: boolean; base64?: boolean } = {},
     ): Promise<{ path: string; bytes: number; appended: boolean }> {
       if (typeof contents !== "string") {
         throw new WorkspaceFileError("The contents to write must be text.");
       }
-      const bytes = Buffer.byteLength(contents, "utf8");
-      if (bytes > limits.writeBytes) {
+      /*
+       * Binary arrives as base64 rather than as UTF-8 text, because a round-trip
+       * through a JSON string would corrupt every byte above 0x7f. The caller
+       * decides the encoding; the limit applies to the decoded payload, so a
+       * base64 wrapper cannot smuggle past the write cap.
+       */
+      const payload = options.base64
+        ? Buffer.from(contents, "base64")
+        : Buffer.from(contents, "utf8");
+      if (payload.byteLength > limits.writeBytes) {
         throw new WorkspaceFileError(
-          `That is ${bytes} bytes and the limit is ${limits.writeBytes}.`,
+          `That is ${payload.byteLength} bytes and the limit is ${limits.writeBytes}.`,
         );
       }
 
       const full = await resolvePath(requested, true);
       await mkdir(dirname(full), { recursive: true });
-      await writeFile(full, contents, {
-        encoding: "utf8",
-        flag: options.append ? "a" : "w",
-      });
-      return { path: requested, bytes, appended: options.append === true };
+      if (options.base64) {
+        await writeFile(full, payload, {
+          flag: options.append ? "a" : "w",
+        });
+      } else {
+        await writeFile(full, contents, {
+          encoding: "utf8",
+          flag: options.append ? "a" : "w",
+        });
+      }
+      return {
+        path: requested,
+        bytes: payload.byteLength,
+        appended: options.append === true,
+      };
     },
   };
 }

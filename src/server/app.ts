@@ -1,9 +1,9 @@
 import { computerRoutes } from './computer-routes.js';
 import { Hono } from 'hono';
-import { bodyLimit } from 'hono/body-limit';
 import { timingSafeEqual } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
-import { Store } from './store.js';
+import { MAX_UPLOAD_BYTES, Store } from './store.js';
 import { Runner } from './runner.js';
 import { configured, type Config } from './research.js';
 import type { Platform } from './platform.js';
@@ -34,13 +34,20 @@ export function createApp({
   connectOrigins = [],
 }: AppOptions): App {
   const app = new Hono() as App;
-  app.use(
-    '/api/*',
-    bodyLimit({
-      maxSize: 1_000_000,
-      onError: (c) => c.json({ error: 'Request is too large.' }, 413),
-    }),
-  );
+  // Request-size ceiling: 1MB for JSON, 200MB for the upload route so the
+  // owner can send images and other binary data in one request. Per-file
+  // size is enforced again by the upload handler itself.
+  const UPLOAD_MAX = 200_000_000;
+  app.use('/api/*', async (c, next) => {
+    const limit =
+      c.req.path === '/api/files' || c.req.path.startsWith('/api/files/')
+        ? UPLOAD_MAX
+        : 1_000_000;
+    const contentLength = Number(c.req.header('content-length') ?? 0);
+    if (contentLength > limit)
+      return c.json({ error: 'Request is too large.' }, 413);
+    await next();
+  });
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
     c.header('X-Content-Type-Options', 'nosniff');
@@ -271,7 +278,61 @@ export function createApp({
       : c.json({ error: 'Memory not found.' }, 404),
   );
   app.get('/api/memories/graph', (c) => c.json(store.memoryGraph()));
-  app.post('/api/memories/:id/links', async (c) => {
+  app.post('/api/files', async (c) => {
+    const form = await c.req.parseBody({ all: true }).catch(() => null);
+    const files = Object.values(form ?? {}).filter(
+      (entry): entry is File => entry instanceof File,
+    );
+    if (files.length === 0)
+      return c.json({ error: 'No files were sent.' }, 400);
+    if (files.length > 32)
+      return c.json({ error: 'At most 32 files per upload.' }, 400);
+    const threadId = Object.values(form ?? {}).find(
+      (entry) => typeof entry === 'string',
+    ) as string | undefined;
+    const saved = [];
+    for (const file of files) {
+      if (file.size > MAX_UPLOAD_BYTES) {
+        return c.json(
+          {
+            error: `"${file.name}" is ${Math.round(file.size / 1024 / 1024)}MB; the limit is 50MB per file.`,
+          },
+          413,
+        );
+      }
+      saved.push(
+        await store.saveUpload(
+          file.name || 'upload',
+          file.type || 'application/octet-stream',
+          Buffer.from(await file.arrayBuffer()),
+          threadId ?? null,
+        ),
+      );
+    }
+    return c.json({ uploads: saved }, 201);
+  });
+  app.get('/api/files', (c) => c.json(store.uploads()));
+  app.get('/api/files/:id', (c) => {
+    const upload = store.upload(c.req.param('id'));
+    return upload ? c.json(upload) : c.json({ error: 'File not found.' }, 404);
+  });
+  app.get('/api/files/:id/data', async (c) => {
+    const upload = store.upload(c.req.param('id'));
+    if (!upload) return c.json({ error: 'File not found.' }, 404);
+    const bytes = await readFile(store.uploadPath(upload.id));
+    return new Response(new Uint8Array(bytes), {
+      headers: {
+        'Content-Type': upload.mime || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${upload.name.replace(/"/g, '')}"`,
+        'Cache-Control': 'no-store',
+      },
+    });
+  });
+  app.delete('/api/files/:id', (c) =>
+    store.deleteUpload(c.req.param('id'))
+      ? c.json({ ok: true })
+      : c.json({ error: 'File not found.' }, 404),
+  );  app.post('/api/memories/:id/links', async (c) => {
     const parsed = z
       .object({
         toId: z.string().trim().min(1).max(100),

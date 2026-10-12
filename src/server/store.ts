@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, rmSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type {
   Action,
   Detail,
@@ -11,6 +12,7 @@ import type {
   Settings,
   Task,
   TaskEvent,
+  Upload,
 } from '../shared/types.js';
 import { SkillsStore } from './skills-store.js';
 import { fuzzyRank } from './fuzzy.js';
@@ -25,16 +27,22 @@ const defaults: Settings = {
   codingPermissions: JSON.stringify({ bash: 'auto', edits: 'auto' }),
   opencodeVariant: 'high',
 };
+/** Most bytes one uploaded file may occupy on disk. */
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 export class Store {
   private db: DatabaseSync;
   /** Skill library; null only when skills storage is intentionally disabled. */
   readonly skills: SkillsStore | null;
-  constructor(path: string, options?: { skillsDir?: string }) {
+  /** Directory holding uploaded file blobs. */
+  private readonly uploadsDir: string;
+  constructor(path: string, options?: { skillsDir?: string; uploadsDir?: string }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.skills = options?.skillsDir
       ? new SkillsStore(options.skillsDir)
       : null;
+    this.uploadsDir = options?.uploadsDir ?? join(dirname(path), 'uploads');
+    mkdirSync(this.uploadsDir, { recursive: true });
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, prompt TEXT NOT NULL, status TEXT NOT NULL, intervalSeconds INTEGER, nextRunAt INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, error TEXT, lease TEXT, leaseUntil INTEGER);
@@ -42,6 +50,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, taskId TEXT NOT NULL, runId TEXT, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, text TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_links (fromId TEXT NOT NULL, toId TEXT NOT NULL, relation TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY (fromId, toId));
+      CREATE TABLE IF NOT EXISTS uploads (id TEXT PRIMARY KEY, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, threadId TEXT, createdAt INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS tasks_due ON tasks(status, nextRunAt);
       CREATE INDEX IF NOT EXISTS runs_task ON runs(taskId, startedAt);
       CREATE INDEX IF NOT EXISTS events_task ON events(taskId, id);`);
@@ -416,5 +425,47 @@ export class Store {
       strength: match.strength,
       links: this.memoryLinks(match.item.id),
     }));
+  }
+  /** Uploaded files: metadata here, bytes on disk under uploadsDir/<id>. */
+  uploads(): Upload[] {
+    return this.db
+      .prepare('SELECT * FROM uploads ORDER BY createdAt DESC')
+      .all() as unknown as Upload[];
+  }
+  upload(id: string): Upload | undefined {
+    return this.db
+      .prepare('SELECT * FROM uploads WHERE id=?')
+      .get(id) as unknown as Upload | undefined;
+  }
+  uploadPath(id: string): string {
+    return join(this.uploadsDir, id);
+  }
+  async saveUpload(
+    name: string,
+    mime: string,
+    bytes: Buffer | Uint8Array,
+    threadId: string | null = null,
+  ): Promise<Upload> {
+    const size = bytes.byteLength;
+    if (size > MAX_UPLOAD_BYTES)
+      throw new Error(
+        `That file is ${size} bytes; the limit is ${MAX_UPLOAD_BYTES}.`,
+      );
+    const id = randomUUID();
+    const file = join(this.uploadsDir, id);
+    await writeFile(file, bytes);
+    this.db
+      .prepare(
+        'INSERT INTO uploads (id, name, mime, size, threadId, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run(id, name, mime, size, threadId, Date.now());
+    return this.upload(id)!;
+  }
+  deleteUpload(id: string): boolean {
+    const existed = this.upload(id) !== undefined;
+    if (!existed) return false;
+    this.db.prepare('DELETE FROM uploads WHERE id=?').run(id);
+    rmSync(join(this.uploadsDir, id), { force: true });
+    return true;
   }
 }

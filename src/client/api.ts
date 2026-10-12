@@ -18,16 +18,24 @@ export async function api<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
+  // FormData (file uploads) is passed through untouched so the browser sets
+  // the multipart boundary itself; anything else travels as JSON.
+  const isFormData =
+    typeof FormData !== 'undefined' && body instanceof FormData;
   const response = await fetch(`/api${path}`, {
     method,
     signal,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(['GET', 'HEAD'].includes(method)
+      ...(isFormData
         ? {}
-        : { 'Content-Type': 'application/json' }),
+        : ['GET', 'HEAD'].includes(method)
+          ? {}
+          : { 'Content-Type': 'application/json' }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined
+      ? {}
+      : { body: isFormData ? (body as FormData) : JSON.stringify(body) }),
   });
   const data = (await response
     .json()

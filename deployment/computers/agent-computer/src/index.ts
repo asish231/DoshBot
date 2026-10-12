@@ -1087,16 +1087,30 @@ serve<StreamData>({
         const body = (await request.json().catch(() => null)) as {
           path?: unknown;
           contents?: unknown;
+          contentsBase64?: unknown;
           append?: unknown;
         } | null;
-        if (typeof body?.contents !== "string") {
-          return json({ error: "The contents to write are required." }, 400);
+        const hasText = typeof body?.contents === "string";
+        const hasBase64 = typeof body?.contentsBase64 === "string";
+        if (hasText === hasBase64) {
+          return json(
+            {
+              error:
+                "Provide exactly one of contents (text) or contentsBase64 (binary).",
+            },
+            400,
+          );
         }
         try {
           return json(
-            await workspace.write(String(body?.path ?? ""), body.contents, {
-              append: body.append === true,
-            }),
+            await workspace.write(
+              String(body?.path ?? ""),
+              (hasText ? body!.contents : body!.contentsBase64) as string,
+              {
+                append: body?.append === true,
+                base64: hasBase64,
+              },
+            ),
           );
         } catch (error) {
           return json(

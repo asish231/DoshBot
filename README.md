@@ -35,6 +35,9 @@ Current highlights:
 - **Research** — `search_web` + `read_public_page` via Parallel, citations saved.
 - **24/7 scheduling** — server-side recurring tasks in their original conversation, pause/retry.
 - **Skills library** — reusable `SKILL.md` instruction files under `data/skills`; add them in Settings or via `/skills`, and Dots create skills for you on their own initiative (`create_skill`), load them before matching tasks (`read_skill`), and keep them current.
+- **Agent-spawned Dot team** — a Dot can create specialist Dots itself (`spawn_dot`), list the team (`list_dots`), and delegate full turns to any of them (`message_dot`, persistent per-pair conversation so specialists remember prior delegations). Created Dots are real workspace Dots you can chat with too.
+- **Binary uploads** — attach images and any binary data in chat (no image count limit, 50MB/file); files upload to the server (`POST /api/files`) and Dots push them into their computer for processing (`push_upload_to_computer`, binary-safe `contentsBase64` writes).
+- **Whole-computer agents** — the Alpine computer is the Dot's own machine: bash with network access, so missing runtimes are installed on demand (`apk add nodejs npm`, `python3 py3-pip`, `git build-base`) with exec timeouts up to 5 minutes, then used to write and run code for you.
 - **Super memory graph** — workspace memories segmented by category with interconnection edges (`link_memories`), fuzzy search that survives typos (`search_memory`), a full graph view (`memory_graph` + `GET /api/memories/graph`), and link chips in the Memories UI. Collecting and personalizing from what you share is each Dot's own judgment.
 - **Spaces + Pages** — searchable library, visual editor, save conversation as page, review-before-save.
 - **Voice + calls, computer browser, Slack/Telegram** — realtime speech, isolated browser/workspace, channel SDKs.
