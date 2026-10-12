@@ -8170,3 +8170,112 @@ copilotkit-web-inspector,
     max-height: 60vh;
   }
 }
+
+/* ==========================================================================
+   Per-message actions (copy / edit / fork / revert) + inline editing.
+   Hover-revealed; keyboard-focusable; theme-var aware.
+   ========================================================================== */
+.chat-message-wrap {
+  position: relative;
+}
+.chat-message-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.chat-message-wrap:hover .chat-message-actions,
+.chat-message-actions:focus-within {
+  opacity: 1;
+}
+.chat-message-actions button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted, #6b6b78);
+  border-radius: 6px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 2px 7px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.chat-message-actions button:hover {
+  background: var(--lavender, #f2f2f7);
+  border-color: var(--line, #e6e6ee);
+  color: var(--ink, #16161d);
+}
+.chat-message-actions button:focus-visible {
+  outline: 2px solid var(--blue, #2f6bff);
+  outline-offset: 1px;
+}
+[data-theme='dark'] .chat-message-actions button:hover {
+  background: #26262f;
+  color: #e8e9ee;
+  border-color: #3a3a46;
+}
+.chat-bubble.editing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-edit-input {
+  width: 100%;
+  border: 1px solid var(--blue, #2f6bff);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: var(--ink, #16161d);
+  padding: 10px 12px;
+  font: inherit;
+  resize: vertical;
+}
+[data-theme='dark'] .chat-edit-input {
+  background: #1d1d24;
+  color: #e8e9ee;
+  border-color: #a9c6ff;
+}
+.chat-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chat-edit-save {
+  background: var(--blue, #2f6bff);
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-edit-save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+[data-theme='dark'] .chat-edit-save {
+  color: #0f0f13;
+}
+.chat-edit-cancel {
+  background: transparent;
+  border: 1px solid var(--line, #e6e6ee);
+  color: var(--ink, #16161d);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+[data-theme='dark'] .chat-edit-cancel {
+  color: #e8e9ee;
+  border-color: #3a3a46;
+}
+.chat-edit-hint {
+  color: var(--muted, #6b6b78);
+  font-size: 11px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-message-actions {
+    transition: none;
+  }
+}

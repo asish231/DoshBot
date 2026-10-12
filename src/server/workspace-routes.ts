@@ -542,6 +542,92 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       );
     }
   });
+  // Fork: branch a conversation into a new one (optionally up to a message).
+  app.post('/conversations/:id/fork', async (c) => {
+    const data = z
+      .object({
+        uptoMessageId: z.string().trim().max(100).optional(),
+        title: z.string().trim().min(1).max(120).optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!data.success)
+      return c.json({ error: 'Invalid fork request.' }, 400);
+    try {
+      const forked = platform.workspace.forkThread(
+        c.req.param('id'),
+        data.data.uptoMessageId,
+        data.data.title,
+      );
+      return c.json(forked, 201);
+    } catch (e) {
+      return c.json(
+        {
+          error:
+            (e instanceof Error && e.message) ||
+            'Could not fork conversation.',
+        },
+        404,
+      );
+    }
+  });
+  // Edit a message in place; turns after it are dropped (edit-and-resend).
+  app.post('/conversations/:id/edit', async (c) => {
+    const data = z
+      .object({
+        messageId: z.string().trim().min(1).max(100),
+        content: z.string().trim().min(1).max(50_000),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!data.success)
+      return c.json(
+        { error: 'A messageId and new content are required.' },
+        400,
+      );
+    try {
+      const result = platform.workspace.editThreadMessage(
+        c.req.param('id'),
+        data.data.messageId,
+        data.data.content,
+      );
+      return c.json(result);
+    } catch (e) {
+      return c.json(
+        {
+          error:
+            (e instanceof Error && e.message) ||
+            'Could not edit the message.',
+        },
+        404,
+      );
+    }
+  });
+  // Revert in place: keep history up to a message, drop the rest.
+  app.post('/conversations/:id/revert', async (c) => {
+    const data = z
+      .object({ messageId: z.string().trim().min(1).max(100) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!data.success)
+      return c.json({ error: 'A messageId is required.' }, 400);
+    try {
+      const removed = platform.workspace.revertThreadToMessage(
+        c.req.param('id'),
+        data.data.messageId,
+      );
+      return c.json({ removed });
+    } catch (e) {
+      return c.json(
+        {
+          error:
+            (e instanceof Error && e.message) ||
+            'Could not revert conversation.',
+        },
+        404,
+      );
+    }
+  });
   app.delete('/conversations', (c) => {
     const dotId = c.req.query('dotId');
     const threads = platform.workspace.conversations();

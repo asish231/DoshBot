@@ -513,6 +513,169 @@ export class WorkspaceStore {
     this.db.prepare('DELETE FROM local_thread_runs WHERE threadId=?').run(id);
     this.db.prepare('DELETE FROM captures WHERE threadId=?').run(id);
   }
+  /**
+   * Forks a conversation: a new thread bound to the same Dot, carrying the
+   * runs (optionally only up to a given message), session memories, and the
+   * task-memory working set. The source conversation is untouched — forks
+   * are the safe way to branch before experimenting or reverting.
+   */
+  forkThread(
+    threadId: string,
+    uptoMessageId?: string,
+    title?: string,
+  ): Conversation {
+    const source = this.requireThread(threadId);
+    const newId = randomUUID();
+    this.db
+      .prepare(
+        'INSERT INTO thread_bindings (id, dotId, ownerId, title, createdAt, learningContainerId) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        newId,
+        source.dotId,
+        this.ownerId,
+        title ?? `Fork of ${source.title}`.slice(0, 120),
+        Date.now(),
+        source.learningContainerId ?? null,
+      );
+    const runs = this.threadRuns(threadId);
+    const capture = this.db
+      .prepare('SELECT value FROM captures WHERE threadId=?')
+      .get(threadId) as { value: string } | undefined;
+    for (const run of runs) {
+      let messages = run.messages;
+      let withinRunCutoff = false;
+      if (uptoMessageId) {
+        try {
+          const parsed = JSON.parse(run.messages) as Array<{ id?: string }>;
+          const index = parsed.findIndex((m) => m.id === uptoMessageId);
+          if (index !== -1) {
+            // The run that holds the cutoff: keep up to and including it.
+            messages = JSON.stringify(parsed.slice(0, index + 1));
+            withinRunCutoff = true;
+          }
+          // Runs before the cutoff simply copy whole — no message inside,
+          // no truncation needed.
+        } catch {
+          /* malformed run — copy as-is */
+        }
+      }
+      this.saveThreadRun({
+        id: randomUUID(),
+        threadId: newId,
+        agentId: run.agentId,
+        parentRunId: run.parentRunId,
+        events: run.events,
+        messages,
+        createdAt: run.createdAt,
+      });
+      if (withinRunCutoff) break;
+    }
+    if (capture)
+      this.db
+        .prepare('INSERT INTO captures (threadId, value) VALUES (?, ?)')
+        .run(newId, capture.value);
+    for (const memory of this.sessionMemories(threadId)) {
+      this.db
+        .prepare(
+          "INSERT INTO session_memories (id, threadId, text, category, createdAt) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(randomUUID(), newId, memory.text, memory.category ?? null, memory.createdAt);
+    }
+    for (const entry of this.taskMemories(threadId)) {
+      this.db
+        .prepare(
+          "INSERT INTO task_memory (id, threadId, name, summary, content, kind, source, bytes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          randomUUID(),
+          newId,
+          entry.name,
+          entry.summary,
+          entry.content,
+          entry.kind,
+          entry.source ?? null,
+          entry.bytes,
+          entry.createdAt,
+          entry.updatedAt,
+        );
+    }
+    return this.requireThread(newId);
+  }
+  /**
+   * Edits one message in place and drops every later turn — standard
+   * edit-and-resend semantics: history after the edit point is discarded
+   * so the next reply follows from the corrected message.
+   */
+  editThreadMessage(
+    threadId: string,
+    messageId: string,
+    content: string,
+  ): { edited: boolean; truncatedRuns: number } {
+    this.requireThread(threadId);
+    const runs = this.threadRuns(threadId);
+    for (let i = 0; i < runs.length; i++) {
+      const run = runs[i]!;
+      try {
+        const parsed = JSON.parse(run.messages) as Array<{
+          id?: string;
+          content?: string | Array<unknown>;
+        }>;
+        const index = parsed.findIndex((m) => m.id === messageId);
+        if (index === -1) continue;
+        if (typeof parsed[index]!.content !== 'string')
+          throw new Error('Only text messages can be edited.');
+        parsed[index]!.content = content;
+        this.db
+          .prepare(
+            'UPDATE local_thread_runs SET messages=? WHERE id=? AND threadId=?',
+          )
+          .run(JSON.stringify(parsed), run.id, threadId);
+        // Drop the turns that followed the edited message.
+        let truncatedRuns = 0;
+        for (let j = i + 1; j < runs.length; j++) {
+          this.db
+            .prepare('DELETE FROM local_thread_runs WHERE id=?')
+            .run(runs[j]!.id);
+          truncatedRuns += 1;
+        }
+        return { edited: true, truncatedRuns };
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('text messages'))
+          throw error;
+        /* malformed run — keep looking */
+      }
+    }
+    throw new Error('Message not found in this conversation.');
+  }
+  /**
+   * Reverts in place: keeps everything up to and including the given
+   * message and discards the rest. Fork first when the discarded tail is
+   * worth keeping.
+   */
+  revertThreadToMessage(threadId: string, messageId: string): number {
+    this.requireThread(threadId);
+    const runs = this.threadRuns(threadId);
+    for (let i = 0; i < runs.length; i++) {
+      const run = runs[i]!;
+      try {
+        const parsed = JSON.parse(run.messages) as Array<{ id?: string }>;
+        if (parsed.some((m) => m.id === messageId)) {
+          let removed = 0;
+          for (let j = i + 1; j < runs.length; j++) {
+            this.db
+              .prepare('DELETE FROM local_thread_runs WHERE id=?')
+              .run(runs[j]!.id);
+            removed += 1;
+          }
+          return removed;
+        }
+      } catch {
+        /* malformed run — skip */
+      }
+    }
+    throw new Error('Message not found in this conversation.');
+  }
   compactThreadMessages(id: string): {
     originalRuns: number;
     compacted: boolean;

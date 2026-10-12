@@ -902,6 +902,10 @@ export function App() {
                   }
                   onOpenTasks={() => setView('tasks')}
                   onNewChat={() => void newConversation()}
+                  onForked={(forkedId) => {
+                    refresh();
+                    setSelectedThread(forkedId);
+                  }}
                 />
               ) : (
                 <div className="new-conversation doshbot-hero">

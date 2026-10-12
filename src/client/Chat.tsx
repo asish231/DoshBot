@@ -228,6 +228,7 @@ export function Chat({
   onOpenSettings,
   onOpenTasks,
   onNewChat,
+  onForked,
 }: {
   thread: Conversation;
   dot: Dot;
@@ -243,6 +244,7 @@ export function Chat({
   onOpenSettings?: (tab?: string) => void;
   onOpenTasks?: () => void;
   onNewChat?: () => void;
+  onForked?: (threadId: string) => void;
 }) {
   const { agent, isReady } = useAgent({
     agentId: `chat-${thread.id}`,
@@ -457,6 +459,56 @@ export function Chat({
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not clear messages.');
+    }
+  };
+
+  // Fork: a new chat carrying history up to (and including) the chosen
+  // message. The original is untouched — the safe branch point.
+  const handleForkFrom = async (messageId: string) => {
+    try {
+      const forked = await api<Conversation>(
+        `/conversations/${thread.id}/fork`,
+        'POST',
+        { uptoMessageId: messageId },
+      );
+      if (onForked && forked?.id) {
+        setCompactMessage(`Forked into “${forked.title}” — switching you there.`);
+        setTimeout(() => setCompactMessage(null), 3000);
+        onForked(forked.id);
+      } else {
+        onSaved();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not fork the chat.');
+    }
+  };
+
+  // Edit-and-resend: rewrite the message, drop later turns, reload.
+  const handleEditMessage = async (messageId: string, content: string) => {
+    try {
+      await api(`/conversations/${thread.id}/edit`, 'POST', {
+        messageId,
+        content,
+      });
+      await copilotkit.connectAgent({ agent });
+      onSaved();
+      // Continue the conversation from the corrected message.
+      void send(content);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not edit the message.');
+    }
+  };
+
+  // Revert in place: history up to this message stays, the rest is dropped.
+  const handleRevertTo = async (messageId: string) => {
+    try {
+      await api(`/conversations/${thread.id}/revert`, 'POST', { messageId });
+      await copilotkit.connectAgent({ agent });
+      onSaved();
+      setCompactMessage('Reverted — later turns were removed.');
+      setTimeout(() => setCompactMessage(null), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not revert the chat.');
     }
   };
 
@@ -1555,6 +1607,9 @@ export function Chat({
               messages={agent.messages}
             />
           )}
+          onFork={(messageId) => void handleForkFrom(messageId)}
+          onEdit={(messageId, content) => void handleEditMessage(messageId, content)}
+          onRevert={(messageId) => void handleRevertTo(messageId)}
         />
         {(liveThinking || finishedThinking) && (
           <div className={`thinking-panel ${thinkingOpen ? 'open' : ''}`}>
