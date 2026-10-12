@@ -32,6 +32,6 @@ export type AskQuestionArgs = z.infer<typeof askQuestionSchema>;
 export const askQuestionTool = {
   name: 'ask_question',
   description:
-    'Ask the user a multiple-choice question to clarify requirements, select an approach, solicit design preferences, or get human approval before proceeding. The user will select an option or provide input, and the tool returns their answer.',
+    'Ask the user ONE multiple-choice question for a genuinely blocking decision: an irreversible or costly action, or a request that is impossible to interpret. Do NOT use this for open-ended requests — for those, pick sensible defaults, state assumptions, and deliver results. When you do use it, return their answer and proceed immediately.',
   parameters: z.toJSONSchema(askQuestionSchema),
 };
