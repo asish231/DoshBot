@@ -376,6 +376,108 @@ describe('TaskForceEngine', () => {
     ).toBe(true);
   });
 
+  it('runs multiple sessions concurrently in a single drive pass', async () => {
+    const { engine, tf } = fixture();
+    engine.startSession({
+      threadId: 'a',
+      dotId: 'dot',
+      mission: 'Audit the onboarding UX flows',
+      hours: 1,
+    });
+    engine.startSession({
+      threadId: 'b',
+      dotId: 'dot',
+      mission: 'Market research for the launch',
+      hours: 1,
+    });
+    // One drive pass starts BOTH sessions and awaits them together — a
+    // long session never blocks a sibling from starting.
+    await engine.drive();
+    const statuses = tf.sessions().map((s) => s.status);
+    expect(statuses).toEqual(['completed', 'completed']);
+  });
+
+  it('recurses: children spawn grandchildren up to the depth cap', async () => {
+    const store = new Store(':memory:');
+    const tf = new TaskForceStore(':memory:');
+    resources.push(() => {
+      store.close();
+      tf.close();
+    });
+    const engine = new TaskForceEngine(store, tf, {
+      transport: (async (_url: unknown, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    '## Finding\nAudit notes.\nSPAWN_DEEP_DIVE: pricing page teardown',
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        )) as unknown as typeof fetch,
+      model: { baseUrl: 'https://m.test/v1', apiKey: 'k', model: 'm' },
+      configOverrides: {
+        waveSize: 1,
+        maxWave: 1,
+        maxDepth: 2,
+        maxSubSessions: 2,
+        maxDirectivesPerWorker: 1,
+      },
+    });
+    const root = engine.startSession({
+      threadId: 'thread',
+      dotId: 'dot',
+      mission: 'Audit the app onboarding UX',
+      hours: 1,
+    });
+    for (let i = 0; i < 12; i++) await engine.drive();
+    const all = tf.sessions();
+    const children = all.filter((s) => s.depth === 1);
+    const grandchildren = all.filter((s) => s.depth === 2);
+    expect(children.length).toBeGreaterThan(0);
+    expect(grandchildren.length).toBeGreaterThan(0);
+    // Depth cap: level 2 workers cannot spawn level 3 sessions.
+    expect(all.filter((s) => s.depth > 2)).toEqual([]);
+    // The tree is genuinely hierarchical: grandchild's parent is a child.
+    expect(
+      grandchildren.every(
+        (g) =>
+          g.parentSessionId !== null &&
+          children.some((c) => c.id === g.parentSessionId),
+      ),
+    ).toBe(true);
+    expect(tf.session(root.id)!.status).toBe('completed');
+  });
+
+  it('feeds sub-agent deposits back into later generations of the parent swarm', async () => {
+    const { engine, tf, callLog } = fixture();
+    const session = engine.startSession({
+      threadId: 'thread',
+      dotId: 'dot',
+      mission: 'Audit the app onboarding UX',
+      hours: 1,
+    });
+    // Simulate a completed sub-swarm's deposit into the parent's graph.
+    tf.saveMemory({
+      sessionId: session.id,
+      generation: 0,
+      kind: 'subsession',
+      title: 'Pricing teardown deposit',
+      summary: 'pricing deep dive found 3 competitor tiers',
+      content: 'pricing deep dive found 3 competitor tiers',
+    });
+    await engine.drive();
+    const withFeedback = callLog.find((p) =>
+      p.includes('DEEP-DIVE SUB-AGENT RESULTS'),
+    );
+    expect(withFeedback).toBeTruthy();
+    expect(withFeedback).toContain('pricing deep dive found 3 competitor tiers');
+  });
+
   it('resumes interrupted sessions after a restart', async () => {
     const { store, tf } = fixture();
     const session = enginelessStart(store, tf);

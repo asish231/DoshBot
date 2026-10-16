@@ -158,6 +158,8 @@ export function buildWorkerPrompt(input: {
   generation: number;
   eliteSummaries: string[];
   ownMemories: string[];
+  /** Summaries deposited by sub-swarms this session's workers spawned. */
+  subResults?: string[];
   deliverables: string[];
   maxDirectives: number;
 }): string {
@@ -171,11 +173,14 @@ export function buildWorkerPrompt(input: {
       ? `EVOLUTION CONTEXT — best findings from earlier generations (summaries):\n- ${input.eliteSummaries.join('\n- ')}`
       : 'No prior generations: you are the founding population. Set the direction.',
     input.ownMemories.length
-      ? `YOUR OWN PRIOR MEMORY (summaries):\n- ${input.ownMemories.join('\n- ')}`
+      ? `YOUR INHERITED MEMORY (from your parent worker):\n- ${input.ownMemories.join('\n- ')}`
+      : '',
+    input.subResults?.length
+      ? `DEEP-DIVE SUB-AGENT RESULTS (from sub-swarms spawned by this mission's earlier workers — build on them, do not repeat them):\n- ${input.subResults.join('\n- ')}`
       : '',
     'Produce your single best contribution to the mission: dense, self-contained analysis or research notes (roughly 300-1200 words), with short markdown headings and bullets.',
     'Stay inside the mission\'s scope. State assumptions in one line. Do not ask questions and do not refuse — reason from the mission context and your expertise.',
-    `Optionally, end with up to ${input.maxDirectives} lines of "SPAWN_DEEP_DIVE: <precise sub-topic>" if a sub-topic genuinely deserves its own dedicated deep-dive swarm. Use this power sparingly.`,
+    `You may spawn your own sub-agents: end with up to ${input.maxDirectives} lines of "SPAWN_DEEP_DIVE: <precise sub-topic>" for sub-topics that deserve a dedicated recursive swarm of their own. Those sub-agents can in turn spawn their own. Use this power for genuine depth, not for routine work.`,
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -282,14 +287,24 @@ export class TaskForceEngine {
       controller.abort(new Error('Task force stopped.'));
   }
 
-  /** One pass over due sessions — the poll body, and the test lever. */
+  /** One pass over due sessions — the poll body, and the test lever.
+   *  Every waiting session starts CONCURRENTLY (a parent's children run
+   *  alongside it); this call awaits only the sessions it started, so a
+   *  long-running session never blocks later passes from starting peers. */
   async drive(): Promise<void> {
     if (this.store.settings().paused) return;
+    const started: Array<Promise<void>> = [];
     for (const session of this.tf.sessions('running')) {
       if (this.active.has(session.id)) continue;
       if (this.store.settings().paused) break;
-      await this.runSession(session.id);
+      this.active.add(session.id);
+      started.push(
+        this.runSession(session.id).finally(() =>
+          this.active.delete(session.id),
+        ),
+      );
     }
+    await Promise.all(started);
   }
 
   private maxHours(): number {
@@ -344,8 +359,10 @@ export class TaskForceEngine {
       waveSize: 16,
       maxWave: 64,
       maxWorkers: this.maxWorkers(),
-      maxDepth: 3,
-      maxSubSessions: 12,
+      // Recursive sub-agent tree: root swarm → workers spawn deep-dive
+      // sub-swarms → their workers spawn deeper ones, to this depth.
+      maxDepth: 6,
+      maxSubSessions: 16,
       maxDirectivesPerWorker: 2,
       deliverables: [],
     };
@@ -386,6 +403,7 @@ export class TaskForceEngine {
     let session = this.tf.session(sessionId);
     if (!session || session.status !== 'running') return;
     const controller = new AbortController();
+    // drive() pre-marks the session active; the set add here is idempotent.
     this.active.add(sessionId);
     this.controllers.set(sessionId, controller);
     try {
@@ -436,6 +454,13 @@ export class TaskForceEngine {
     const generation = session.generation + 1;
     const waveSize = nextWaveSize(config, generation);
     const elites = this.elitesOf(session);
+    // Feedback loop: deposits from this session's sub-swarms (its workers'
+    // spawned sub-agents) ride into every prompt of the new generation, so
+    // the parent evolves WITH its children's results, not beside them.
+    const subDeposits = this.tf
+      .memories(session.id, 'subsession')
+      .slice(0, 3)
+      .map((m) => m.summary);
     const wave = Array.from({ length: waveSize }, (_, i) =>
       this.tf.createWorker({
         sessionId: session.id,
@@ -458,7 +483,8 @@ export class TaskForceEngine {
               perspective: worker.perspective,
               generation,
               eliteSummaries: elites.map((e) => e.summary).slice(0, 5),
-              ownMemories: [],
+              ownMemories: parent ? [`${parent.perspective}: ${parent.summary}`] : [],
+              subResults: subDeposits,
               deliverables: config.deliverables,
               maxDirectives: config.maxDirectivesPerWorker,
             });
@@ -692,6 +718,11 @@ export class TaskForceEngine {
     const subLines = subs
       .filter((s) => s.summary)
       .map((s) => `- ${s.mission.slice(0, 120)}: ${s.summary!.slice(0, 300)}`);
+    // Recursive sessions run concurrently; some sub-agents may still be
+    // working. Their deposits land in the memory graph for recall later.
+    const pendingSubs = subs.filter(
+      (s) => s.status === 'running' || s.status === 'paused',
+    );
     let report: string;
     try {
       report = await this.callModel(
@@ -710,7 +741,12 @@ export class TaskForceEngine {
                 .join('\n\n---\n\n')}`
             : '',
           subLines.length
-            ? `DEEP-DIVE SUB-MISSION RESULTS:\n${subLines.join('\n')}`
+            ? `DEEP-DIVE SUB-AGENT RESULTS (recursive sub-swarms):\n${subLines.join('\n')}`
+            : '',
+          pendingSubs.length
+            ? `SUB-AGENTS STILL WORKING (acknowledge as in-flight, do not fabricate their results): ${pendingSubs
+                .map((s) => s.mission.slice(0, 120))
+                .join('; ')}`
             : '',
           'Structure: executive summary, then findings by priority, then concrete recommendations (what to do, what to fix, what to add), then open questions. Be specific and cite the swarm\'s findings.',
         ]
@@ -776,10 +812,11 @@ export class TaskForceEngine {
       }
     } else if (this.options.notify) {
       const workers = this.tf.workerCount(sessionId);
+      const pending = pendingSubs.length;
       try {
         await this.options.notify(
           session.threadId,
-          `Your long-horizon task force finished (${reason}): ${session.generation} generations, ${workers} specialist workers, ${this.tf.subSessions(sessionId).length} deep-dive sub-missions. Present the report below to the owner, and mention the full report is saved as an artifact in this chat.\n\n${report.slice(0, 6000)}`,
+          `Your long-horizon task force finished (${reason}): ${session.generation} generations, ${workers} specialist workers, ${this.tf.subSessions(sessionId).length} recursive deep-dive sub-missions${pending ? `, ${pending} still finishing (their results will land in the swarm's memory — ask me to recall them later)` : ''}. Present the report below to the owner, and mention the full report is saved as an artifact in this chat.\n\n${report.slice(0, 6000)}`,
         );
       } catch (error) {
         this.tf.updateSession(sessionId, {

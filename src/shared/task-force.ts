@@ -18,7 +18,9 @@ export interface TaskForceConfig {
   maxWave: number;
   /** Hard ceiling on total workers in one session. */
   maxWorkers: number;
-  /** How deep sub-sessions may nest (root = depth 0). */
+  /** How deep the recursive sub-agent tree may nest: a root swarm's workers
+   *  spawn deep-dive sub-swarms, whose workers spawn deeper ones, to this
+   *  level (root = depth 0). */
   maxDepth: number;
   /** Cap on child sessions a session may spawn. */
   maxSubSessions: number;

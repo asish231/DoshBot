@@ -15,8 +15,10 @@ export const DEFAULT_TASK_FORCE_CONFIG: TaskForceConfig = {
   waveSize: 16,
   maxWave: 64,
   maxWorkers: 2000,
-  maxDepth: 3,
-  maxSubSessions: 12,
+  // Recursive sub-agent depth: workers spawn sub-swarms whose workers can
+  // spawn deeper sub-swarms, down to this level.
+  maxDepth: 6,
+  maxSubSessions: 16,
   maxDirectivesPerWorker: 2,
   deliverables: [],
 };
