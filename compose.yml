@@ -26,6 +26,8 @@ services:
       PARALLEL_API_KEY: ${PARALLEL_API_KEY:-}
       BROWSER_URL: http://browser:4311
       BROWSER_SECRET: ${BROWSER_SECRET:-}
+      SKILLS_DIR: /data/skills
+      UPLOADS_DIR: /data/uploads
     volumes:
       - opendots-data:/data
     networks:

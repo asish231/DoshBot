@@ -6,11 +6,11 @@ COPY . .
 RUN npm run build
 
 FROM node:24-bookworm-slim AS app
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=4310 DATABASE_PATH=/data/opendots.sqlite
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=4310 DATABASE_PATH=/data/opendots.sqlite SKILLS_DIR=/data/skills UPLOADS_DIR=/data/uploads
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev && mkdir -p /data && chown node:node /data
-COPY --from=build /app/dist ./dist
+RUN npm ci --omit=dev && mkdir -p /data /app/data && chown -R node:node /data /app
+COPY --from=build --chown=node:node /app/dist ./dist
 USER node
 EXPOSE 4310
 CMD ["node", "dist/server/server/index.js"]
