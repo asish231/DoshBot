@@ -5,15 +5,7 @@ ENV PATH="/usr/local/bin:${PATH}"
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-COPY deployment/computers/cache-apks /tmp/cache-apks
-RUN ARCH="$(apk --print-arch)" && \
-    if [ "$ARCH" = "aarch64" ] && [ -d /tmp/cache-apks ] && [ "$(ls -A /tmp/cache-apks/*.apk 2>/dev/null)" ]; then \
-      apk add --no-cache --allow-untrusted /tmp/cache-apks/*.apk; \
-    else \
-      apk add --no-cache chromium bash; \
-    fi && \
-    apk add --no-cache font-wqy-zenhei font-noto-cjk font-noto-arabic && \
-    rm -rf /tmp/cache-apks
+RUN apk add --no-cache chromium bash font-wqy-zenhei font-noto-cjk font-noto-arabic
 
 # Symlink system chromium so Playwright detects it under its expected paths
 RUN for dir in chromium-1155 chromium-1234 chromium-1240 chromium; do \
