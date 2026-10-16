@@ -33,9 +33,9 @@ Edit `.env` on the server and restart after changes:
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_WS_URL` | Endpoint overrides for your Intelligence deployment       |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`              | Model credential and model identifier                     |
 | `OPENAI_BASE_URL`                             | Compatible model API endpoint                             |
-| `OWNER_ID`                                    | Stable identity used for this deployment's conversations  |
+| `OWNER_ID`                                    | Stable identity the first signed-up account adopts; owns pre-existing conversations |
 | `DATABASE_PATH`                               | SQLite file containing pages, workspace and work metadata |
-| `OWNER_TOKEN`                                 | Application access token; required for external bindings  |
+| `OWNER_TOKEN`                                 | Break-glass token mapped to the owner account; required for external bindings  |
 | `APP_ORIGIN`                                  | Exact browser origin when using a proxy or custom domain  |
 
 The model environment variable names follow the configured provider adapter. Provider credentials belong in `.env`, not client-side variables or source code. Conversation history lives in the configured Intelligence project; copying the SQLite file alone does not back up that history.

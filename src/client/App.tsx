@@ -12,6 +12,7 @@ import {
   Folder,
   FolderOpen,
   FolderGit2,
+  Lock,
   Menu,
   Monitor,
   MoreHorizontal,
@@ -83,6 +84,7 @@ import type {
   WorkspaceState,
 } from '../shared/types';
 import { api, ApiError, authHeaders, setToken } from './api';
+import type { AuthUser } from '../server/auth';
 import {
   SlashCommandsMenu,
   SLASH_COMMANDS,
@@ -204,7 +206,24 @@ export function App() {
 
   const [error, setError] = useState('');
   const [auth, setAuth] = useState('');
+  const [remember, setRemember] = useState(true);
   const [needsAuth, setNeedsAuth] = useState(false);
+  // Account-based sign-in state.
+  const [account, setAccount] = useState<{
+    email: string;
+    password: string;
+    displayName: string;
+  }>({ email: '', password: '', displayName: '' });
+  const [authTab, setAuthTab] = useState<'login' | 'signup'>('login');
+  const [authBusy, setAuthBusy] = useState(false);
+  // OWNER_TOKEN for the first account on token-protected deployments.
+  const [setupToken, setSetupToken] = useState('');
+  const [authStatus, setAuthStatus] = useState<{
+    needsSetup: boolean;
+    authRequired: boolean;
+    setupRequiresToken?: boolean;
+    user: AuthUser | null;
+  } | null>(null);
   const [dialog, setDialog] = useState<Dialog>();
   const [mobile, setMobile] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
@@ -305,7 +324,11 @@ export function App() {
   const stt = useSpeechToText((text) => {
     setPrompt((prev) => (prev ? `${prev} ${text}` : text));
   });
+  const backoffUntil = useRef(0);
   const refresh = useCallback(async () => {
+    // A 429 means the rate limiter is cooling down; hammering it again
+    // every poll only prolongs the lockout.
+    if (Date.now() < backoffUntil.current) return;
     try {
       const [s, w] = await Promise.all([
         api<State>('/state'),
@@ -316,18 +339,71 @@ export function App() {
       setNeedsAuth(false);
       setSelectedDot((previous) => previous || w.dots[0]?.id || '');
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setNeedsAuth(true);
-      else
+      if (e instanceof ApiError && e.status === 401) {
+        // The stored session/token no longer resolves on the server —
+        // drop it so requests stop carrying a dead credential.
+        setToken('');
+        setNeedsAuth(true);
+        void api<{
+          needsSetup: boolean;
+          authRequired: boolean;
+          user: AuthUser | null;
+        }>('/auth/status')
+          .then((status) => {
+            setAuthStatus(status);
+            if (status.needsSetup) setAuthTab('signup');
+          })
+          .catch(() => {});
+      } else if (e instanceof ApiError && e.status === 429) {
+        backoffUntil.current = Date.now() + 15_000;
+        setError(e.message);
+      } else
         setError(
           e instanceof Error ? e.message : 'Could not connect to the server.',
         );
     }
   }, []);
+  const [authChecked, setAuthChecked] = useState(false);
   useEffect(() => {
+    // Gate on first load: decide from the server whether a session applies
+    // BEFORE any workspace polling starts, so the workspace can never
+    // race past the login screen into a signed-out app.
+    let active = true;
+    void api<{
+      needsSetup: boolean;
+      authRequired: boolean;
+      setupRequiresToken: boolean;
+      user: AuthUser | null;
+    }>('/auth/status')
+      .then((status) => {
+        if (!active) return;
+        setAuthStatus(status);
+        setAuthChecked(true);
+        if (status.needsSetup) {
+          setAuthTab('signup');
+          setNeedsAuth(true);
+        } else if (status.authRequired && !status.user) {
+          setNeedsAuth(true);
+        }
+        // Signed in, or a legacy open deployment: needsAuth stays false
+        // and the poll effect below loads the workspace.
+      })
+      .catch(() => {
+        // Status unreachable: let the poll retry the connection.
+        if (active) setAuthChecked(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  useEffect(() => {
+    // While locked, or before the auth check resolves, there is nothing
+    // to poll; retrying would only pile up failed attempts.
+    if (needsAuth || !authChecked) return;
     void refresh();
     const timer = setInterval(() => void refresh(), 3000);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, needsAuth, authChecked]);
   useEffect(() => {
     setCapture(undefined);
     if (!selectedThread) return;
@@ -484,49 +560,263 @@ export function App() {
     }
   };
 
-  if (needsAuth)
+  const submitAccount = async (
+    e: React.FormEvent<HTMLFormElement> | undefined,
+  ) => {
+    e?.preventDefault();
+    setAuthBusy(true);
+    setError('');
+    try {
+      const needsSetupToken = Boolean(
+        authTab === 'signup' && authStatus?.setupRequiresToken,
+      );
+      if (needsSetupToken && !setupToken.trim())
+        throw new Error('Enter the server owner token from your .env.');
+      // On token-protected deployments the bootstrap signup must carry
+      // OWNER_TOKEN; using it as the request credential does exactly that.
+      if (needsSetupToken) setToken(setupToken.trim(), false);
+      const path = authTab === 'signup' ? '/auth/signup' : '/auth/login';
+      const body =
+        authTab === 'signup'
+          ? {
+              email: account.email,
+              password: account.password,
+              displayName: account.displayName || undefined,
+            }
+          : { email: account.email, password: account.password };
+      const res = await api<{ user: AuthUser; token: string }>(
+        path,
+        'POST',
+        body,
+      );
+      setToken(res.token, remember);
+      setAccount({ email: '', password: '', displayName: '' });
+      setSetupToken('');
+      setAuthStatus({
+        needsSetup: false,
+        authRequired: true,
+        user: res.user,
+      });
+      await refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Could not sign in.',
+      );
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      await api('/auth/logout', 'POST', {});
+    } catch {
+      /* the session is being discarded either way */
+    }
+    setToken('');
+    setError('');
+    setState(undefined);
+    setWorkspace(undefined);
+    setNeedsAuth(true);
+    setAuthStatus((prev) =>
+      prev ? { ...prev, user: null } : prev,
+    );
+  };
+
+  if (needsAuth) {
+    const needsSetup = authStatus?.needsSetup ?? false;
+    const accountFlow = needsSetup || (authStatus?.authRequired ?? true);
     return (
       <main className="unlock">
         <Mascot />
-        <h1>Your own little corner.</h1>
-        <p>
-          Enter the owner access token configured on this template’s server.
-        </p>
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setToken(auth);
-            try {
-              await api('/state');
-              setError('');
-              await refresh();
-            } catch (err) {
-              setError(
-                err instanceof Error
-                  ? err.message
-                  : 'Access token was not accepted.',
-              );
-            }
-          }}
-        >
-          <input
-            type="password"
-            aria-label="Owner access token"
-            autoComplete="current-password"
-            value={auth}
-            onChange={(e) => setAuth(e.target.value)}
-            required
-          />
-          <button className="primary">Unlock DoshBot</button>
-        </form>
-        {error && (
-          <p className="chat-error" role="alert">
-            {error}
-          </p>
+        {accountFlow ? (
+          <>
+            <h1>
+              {needsSetup
+                ? 'Set up your DoshBot'
+                : 'Your own little corner.'}
+            </h1>
+            <p>
+              {needsSetup
+                ? 'Create the owner account — it adopts every existing conversation on this deployment.'
+                : 'Sign in to your workspace.'}
+            </p>
+            {!needsSetup && (
+              <div className="auth-tabs" role="tablist">
+                <button
+                  role="tab"
+                  aria-selected={authTab === 'login'}
+                  className={authTab === 'login' ? 'active' : ''}
+                  onClick={() => setAuthTab('login')}
+                >
+                  Sign in
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={authTab === 'signup'}
+                  className={authTab === 'signup' ? 'active' : ''}
+                  onClick={() => setAuthTab('signup')}
+                >
+                  Create account
+                </button>
+              </div>
+            )}
+            <form onSubmit={submitAccount}>
+              {authTab === 'signup' && authStatus?.setupRequiresToken && (
+                <input
+                  type="password"
+                  aria-label="Server owner token"
+                  placeholder="Server owner token (OWNER_TOKEN from your .env)"
+                  autoComplete="one-time-code"
+                  required
+                  value={setupToken}
+                  onChange={(e) => setSetupToken(e.target.value)}
+                />
+              )}
+              {authTab === 'signup' && (
+                <input
+                  type="text"
+                  aria-label="Display name"
+                  placeholder="Display name (optional)"
+                  maxLength={60}
+                  value={account.displayName}
+                  onChange={(e) =>
+                    setAccount((prev) => ({
+                      ...prev,
+                      displayName: e.target.value,
+                    }))
+                  }
+                />
+              )}
+              <input
+                type="email"
+                aria-label="Email"
+                placeholder="you@example.com"
+                autoComplete="email"
+                required
+                value={account.email}
+                onChange={(e) =>
+                  setAccount((prev) => ({ ...prev, email: e.target.value }))
+                }
+              />
+              <input
+                type="password"
+                aria-label="Password"
+                placeholder="Password (8+ characters)"
+                autoComplete={
+                  authTab === 'signup' ? 'new-password' : 'current-password'
+                }
+                required
+                minLength={8}
+                value={account.password}
+                onChange={(e) =>
+                  setAccount((prev) => ({ ...prev, password: e.target.value }))
+                }
+              />
+              <label className="unlock-remember">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                Keep me signed in on this device
+              </label>
+              <button className="primary" disabled={authBusy}>
+                {authBusy
+                  ? 'One moment…'
+                  : needsSetup
+                    ? 'Create owner account'
+                    : authTab === 'signup'
+                      ? 'Create account'
+                      : 'Sign in'}
+              </button>
+            </form>
+            {error && (
+              <p className="chat-error" role="alert">
+                {error}
+              </p>
+            )}
+            <p className="muted">
+              {remember
+                ? 'You stay signed in on this device until you sign out.'
+                : 'The session stays in this tab’s storage only.'}
+            </p>
+            <details className="unlock-token-details">
+              <summary>Use an access token instead</summary>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setToken(auth, remember);
+                  try {
+                    await api('/state');
+                    setError('');
+                    await refresh();
+                  } catch (err) {
+                    setError(
+                      err instanceof Error
+                        ? err.message
+                        : 'Access token was not accepted.',
+                    );
+                  }
+                }}
+              >
+                <input
+                  type="password"
+                  aria-label="Owner access token"
+                  placeholder="Owner access token"
+                  value={auth}
+                  onChange={(e) => setAuth(e.target.value)}
+                  required
+                />
+                <button>Unlock</button>
+              </form>
+            </details>
+          </>
+        ) : (
+          <>
+            <h1>Your own little corner.</h1>
+            <p>
+              Enter the owner access token configured on this template’s
+              server.
+            </p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setToken(auth, remember);
+                try {
+                  await api('/state');
+                  setError('');
+                  await refresh();
+                } catch (err) {
+                  setError(
+                    err instanceof Error
+                      ? err.message
+                      : 'Access token was not accepted.',
+                  );
+                }
+              }}
+            >
+              <input
+                type="password"
+                aria-label="Owner access token"
+                autoComplete="current-password"
+                value={auth}
+                onChange={(e) => setAuth(e.target.value)}
+                required
+              />
+              <button className="primary">Unlock DoshBot</button>
+            </form>
+            {error && (
+              <p className="chat-error" role="alert">
+                {error}
+              </p>
+            )}
+            <p className="muted">The token stays in this tab’s session storage.</p>
+          </>
         )}
-        <p className="muted">The token stays in this tab’s session storage.</p>
       </main>
     );
+  }
   if (!state || !workspace || !dot)
     return (
       <main className="unlock">
@@ -744,16 +1034,42 @@ export function App() {
             <Settings2 size={17} />
             <span>Settings & setup</span>
           </button>
-          <a
-            className="nav-item"
-            href="https://github.com/asish231/DoshBot"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <Code2 size={17} />
-            <span>DoshBot on GitHub</span>
-            <ArrowUpRight size={13} />
-          </a>
+          {authStatus?.user ? (
+            <>
+              <div className="nav-user" title={authStatus.user.email}>
+                <small className="nav-user-name">
+                  {authStatus.user.displayName}
+                </small>
+                <small className="nav-user-role">
+                  {authStatus.user.role === 'owner'
+                    ? 'Owner'
+                    : 'Member'}{' '}
+                  · {authStatus.user.email}
+                </small>
+              </div>
+              <button
+                className="nav-item"
+                onClick={() => void signOut()}
+              >
+                <Lock size={17} />
+                <span>Sign out</span>
+              </button>
+            </>
+          ) : (
+            <button
+              className="nav-item"
+              onClick={() => {
+                setToken('');
+                setError('');
+                setState(undefined);
+                setWorkspace(undefined);
+                setNeedsAuth(true);
+              }}
+            >
+              <Lock size={17} />
+              <span>Lock DoshBot</span>
+            </button>
+          )}
           <div className="version">
             DOSHBOT <span>v0.2</span>
           </div>

@@ -133,6 +133,29 @@ it('rejects a Dot missing from runtime metadata', async () => {
     ),
   ).rejects.toThrow('Dot is unavailable');
 });
+it('explains unexpected runtime shapes instead of failing schema validation', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        version: '1.77.0',
+        agents: {},
+        mode: 'sse',
+      }),
+    ),
+  );
+  await expect(
+    runThreadTurn(
+      'https://runtime.test',
+      {},
+      'dot',
+      'thread',
+      'Call',
+      new AbortController().signal,
+    ),
+  ).rejects.toThrow('cloud Intelligence runtime');
+  expect(sdk.run).not.toHaveBeenCalled();
+});
 
 it('aborts the running SDK turn and releases the subscriber on cancellation', async () => {
   vi.stubGlobal(

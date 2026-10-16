@@ -11,9 +11,14 @@ import { VoiceService } from './voice.js';
 import { workspaceRoutes } from './workspace-routes.js';
 import { redactSettings, resolveSettingsPatch } from './settings-redaction.js';
 import { skillInputSchema } from '../shared/skills.js';
+import type { AuthRateLimiter } from './auth-rate-limit.js';
+import type { WsTicketStore } from './ws-tickets.js';
+import { AuthError, type AuthStore, type AuthUser } from './auth.js';
 const interval = z.number().int().min(60).max(31_536_000).nullable();
 /** The Hono app with an extra handle for shutdown-time voice-call cleanup. */
-export type App = Hono & { voiceService: VoiceService | undefined };
+export type App = Hono<{
+  Variables: { user?: AuthUser };
+}> & { voiceService: VoiceService | undefined };
 export interface AppOptions {
   store: Store;
   runner: Runner;
@@ -23,6 +28,12 @@ export interface AppOptions {
   platform?: Platform;
   /** Extra connect-src origins allowed by the CSP (e.g. the Intelligence WS origin). */
   connectOrigins?: string[];
+  /** Counts and blocks repeated failed-token attempts per client. */
+  authLimiter?: AuthRateLimiter;
+  /** Issues single-use tickets for the voice WebSocket upgrade. */
+  wsTickets?: WsTicketStore;
+  /** User accounts and sessions; when present the app is multi-user. */
+  auth?: AuthStore;
 }
 export function createApp({
   store,
@@ -32,6 +43,9 @@ export function createApp({
   origin,
   platform,
   connectOrigins = [],
+  authLimiter,
+  wsTickets,
+  auth,
 }: AppOptions): App {
   const app = new Hono() as App;
   // Request-size ceiling: 1MB for JSON, 200MB for the upload route so the
@@ -94,19 +108,76 @@ export function createApp({
       return c.json({ error: 'Cross-origin requests are not allowed.' }, 403);
     if (c.req.header('sec-fetch-site') === 'cross-site')
       return c.json({ error: 'Cross-site requests are not allowed.' }, 403);
-    if (ownerToken) {
+    // ── Authentication ──────────────────────────────────────────────
+    // With an auth store the app is multi-user: a session token in the
+    // Authorization header signs the request in as one user, and every
+    // user sees only their own data. OWNER_TOKEN stays as break-glass
+    // access to the owner account. Without an auth store the legacy
+    // single-token gate applies unchanged.
+    const bearer =
+      c.req.header('authorization')?.replace(/^Bearer /, '') ?? '';
+    const client =
+      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+      c.req.header('x-real-ip') ||
+      'local';
+    if (authLimiter) {
+      const waitMs = authLimiter.blockedFor(client);
+      if (waitMs > 0)
+        return c.json(
+          { error: 'Too many failed attempts. Try again shortly.' },
+          429,
+          { 'Retry-After': String(Math.ceil(waitMs / 1000)) },
+        );
+    }
+    let user: AuthUser | undefined;
+    if (auth) {
+      user = auth.validate(bearer);
+      if (!user && ownerToken && bearer) {
+        const expected = Buffer.from(ownerToken);
+        const supplied = Buffer.from(bearer);
+        if (
+          expected.length === supplied.length &&
+          timingSafeEqual(expected, supplied)
+        )
+          user = auth.breakGlassUser();
+      }
+      if (user) c.set('user', user);
+      else {
+        // Auth endpoints manage themselves; everything else requires a
+        // signed-in session. A deployment without accounts is locked to
+        // the setup screen until the owner account exists — nothing in
+        // the app is usable before login.
+        const isAuthRoute = c.req.path.startsWith('/api/auth/');
+        if (!isAuthRoute) {
+          // Only wrong-credential attempts feed the brute-force limiter;
+          // a request without credentials is simply signed out. The
+          // client drops dead tokens on the first 401, so an idle
+          // polling client cannot lock itself out.
+          if (bearer) authLimiter?.record(client);
+          return c.json(
+            auth.userCount() === 0
+              ? {
+                  error: 'Set up the owner account to start.',
+                  code: 'SETUP_REQUIRED',
+                }
+              : { error: 'Sign in to continue.', code: 'AUTH_REQUIRED' },
+            401,
+          );
+        }
+      }
+    } else if (ownerToken) {
       const expected = Buffer.from(ownerToken);
-      const supplied = Buffer.from(
-        c.req.header('authorization')?.replace(/^Bearer /, '') ?? '',
-      );
+      const supplied = Buffer.from(bearer);
       if (
         expected.length !== supplied.length ||
         !timingSafeEqual(expected, supplied)
-      )
+      ) {
+        authLimiter?.record(client);
         return c.json(
           { error: 'Enter your owner access token to unlock OpenDots.' },
           401,
         );
+      }
     }
     if (
       !['GET', 'HEAD'].includes(c.req.method) &&
@@ -118,15 +189,295 @@ export function createApp({
   if (platform) app.route('/api', computerRoutes(platform.computers));
   const voice = platform ? new VoiceService(platform) : undefined;
   if (platform && voice) app.route('/api', workspaceRoutes(platform, voice));
+  // ── Accounts & sessions ────────────────────────────────────────────
+  // A scheduled task is visible to its owner; the owner role sees all.
+  const ownedTask = (
+    c: {
+      get: (key: string) => unknown;
+      req: { param: (key: string) => string };
+    },
+    id: string,
+  ): boolean => {
+    const task = store.task(id);
+    if (!task) return false;
+    const actor = c.get('user') as AuthUser | undefined;
+    if (!actor) return true; // open bootstrap/legacy mode
+    return actor.role === 'owner' || task.ownerId === actor.id;
+  };
+  app.get('/api/auth/status', (c) =>
+    c.json({
+      needsSetup: auth ? auth.userCount() === 0 : false,
+      authRequired: auth
+        ? auth.userCount() > 0 || Boolean(ownerToken)
+        : Boolean(ownerToken),
+      // On externally-protected deployments the very first signup must
+      // prove control of OWNER_TOKEN; loopback dev without it is open.
+      setupRequiresToken: Boolean(
+        auth && ownerToken && auth.userCount() === 0,
+      ),
+      user: c.get('user') ?? null,
+    }),
+  );
+  app.post('/api/auth/signup', async (c) => {
+    if (!auth)
+      return c.json(
+        { error: 'Accounts are not enabled on this deployment.' },
+        501,
+      );
+    const parsed = z
+      .object({
+        email: z.string().trim().min(3).max(200),
+        password: z.string().min(8).max(200),
+        displayName: z.string().trim().max(60).optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json(
+        { error: 'Enter an email and a password of at least 8 characters.' },
+        400,
+      );
+    if (
+      auth.userCount() > 0 &&
+      store.settings().allowSignups === false
+    )
+      return c.json({ error: 'New signups are disabled by the owner.' }, 403);
+    // Owner-squat protection: the signup that bootstrap-creates the owner
+    // account must prove control of this deployment when a break-glass
+    // token is configured. The middleware has already validated the token
+    // and set the user in that case.
+    if (ownerToken && auth.userCount() === 0 && !c.get('user'))
+      return c.json(
+        {
+          error:
+            'This deployment requires the server owner token to create the first account. Enter OWNER_TOKEN from your .env.',
+        },
+        403,
+      );
+    const client =
+      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+      c.req.header('x-real-ip') ||
+      'local';
+    const key = `signup|${client}`;
+    const waitMs = authLimiter?.blockedFor(key) ?? 0;
+    if (waitMs > 0)
+      return c.json(
+        { error: 'Too many attempts. Try again shortly.' },
+        429,
+        { 'Retry-After': String(Math.ceil(waitMs / 1000)) },
+      );
+    try {
+      const { user, token } = auth.signup(
+        parsed.data.email,
+        parsed.data.password,
+        parsed.data.displayName,
+      );
+      c.set('user', user);
+      return c.json({ user, token });
+    } catch (error) {
+      authLimiter?.record(key);
+      return c.json(
+        {
+          error:
+            error instanceof AuthError
+              ? error.message
+              : 'Could not create the account.',
+        },
+        409,
+      );
+    }
+  });
+  app.post('/api/auth/login', async (c) => {
+    if (!auth)
+      return c.json(
+        { error: 'Accounts are not enabled on this deployment.' },
+        501,
+      );
+    const parsed = z
+      .object({
+        email: z.string().trim().min(3).max(200),
+        password: z.string().min(1).max(200),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json({ error: 'Enter your email and password.' }, 400);
+    const client =
+      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+      c.req.header('x-real-ip') ||
+      'local';
+    const key = `login|${client}|${parsed.data.email.toLowerCase()}`;
+    const waitMs = authLimiter?.blockedFor(key) ?? 0;
+    if (waitMs > 0)
+      return c.json(
+        { error: 'Too many failed attempts. Try again shortly.' },
+        429,
+        { 'Retry-After': String(Math.ceil(waitMs / 1000)) },
+      );
+    try {
+      const { user, token } = auth.login(
+        parsed.data.email,
+        parsed.data.password,
+      );
+      c.set('user', user);
+      return c.json({ user, token });
+    } catch (error) {
+      authLimiter?.record(key);
+      return c.json(
+        {
+          error:
+            error instanceof AuthError
+              ? error.message
+              : 'Could not sign in.',
+        },
+        401,
+      );
+    }
+  });
+  app.post('/api/auth/logout', (c) => {
+    auth?.logout(
+      c.req.header('authorization')?.replace(/^Bearer /, '') ?? '',
+    );
+    return c.json({ ok: true });
+  });
+  app.get('/api/auth/me', (c) => {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'Sign in to continue.' }, 401);
+    return c.json({ user });
+  });
   app.get('/api/state', (c) =>
     c.json({
       settings: redactSettings(store.settings()),
-      tasks: store.tasks(),
-      memories: store.memories(),
+      tasks: store.tasks(c.get('user')?.id),
+      memories: store.memories(undefined, c.get('user')?.id),
       mode: config.mode,
       configured: configured(config),
     }),
   );
+  // Single-use voice WebSocket ticket. The owner token travels in the
+  // Authorization header; the URL the WebSocket opens afterwards carries
+  // only a short-lived, one-time ticket bound to the signed-in user.
+  app.post('/api/voice/ws-ticket', (c) => {
+    if (!wsTickets)
+      return c.json(
+        { error: 'Voice WebSocket tickets are not available.' },
+        501,
+      );
+    return c.json(wsTickets.create(c.get('user')?.id));
+  });
+  // Local/custom OpenAI-compatible provider: test an endpoint and list its
+  // models, or auto-detect the usual local suspects (Ollama :11434,
+  // LM Studio :1234, llama.cpp :8080). Owner-only, like Settings itself.
+  const providerListModels = async (
+    baseUrl: string,
+    apiKey: string | undefined,
+    timeoutMs: number,
+  ): Promise<string[]> => {
+    const base = baseUrl.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(base))
+      throw new Error('Use an http(s) endpoint URL.');
+    const headers: Record<string, string> = {};
+    if (apiKey?.trim()) headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+    const res = await fetch(`${base}/models`, {
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok)
+      throw new Error(
+        `Endpoint returned HTTP ${res.status}. Check the URL and key.`,
+      );
+    const body = (await res.json().catch(() => null)) as {
+      data?: Array<{ id?: unknown }>;
+    } | null;
+    const ids =
+      body && Array.isArray(body.data)
+        ? body.data
+            .map((m) => m?.id)
+            .filter(
+              (id): id is string => typeof id === 'string' && id.trim().length > 0,
+            )
+            .map((id) => id.trim())
+        : [];
+    if (ids.length === 0)
+      throw new Error('The endpoint answered but listed no models.');
+    return Array.from(new Set(ids));
+  };
+  const requireProviderOwner = (c: {
+    get: (key: string) => unknown;
+  }): boolean =>
+    Boolean(
+      auth &&
+        auth.userCount() > 0 &&
+        (c.get('user') as AuthUser | undefined)?.role !== 'owner',
+    );
+  app.post('/api/provider/test', async (c) => {
+    if (requireProviderOwner(c))
+      return c.json(
+        { error: 'Only the owner can change these settings.' },
+        403,
+      );
+    const parsed = z
+      .object({
+        baseUrl: z.string().trim().min(1).max(500),
+        apiKey: z.string().max(500).optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success)
+      return c.json({ error: 'Provide an endpoint URL.' }, 400);
+    try {
+      const models = await providerListModels(
+        parsed.data.baseUrl,
+        parsed.data.apiKey,
+        8000,
+      );
+      return c.json({
+        baseUrl: parsed.data.baseUrl.trim().replace(/\/+$/, ''),
+        models,
+        count: models.length,
+      });
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Could not reach the endpoint.',
+        },
+        502,
+      );
+    }
+  });
+  app.post('/api/provider/detect', async (c) => {
+    if (requireProviderOwner(c))
+      return c.json(
+        { error: 'Only the owner can change these settings.' },
+        403,
+      );
+    const candidates = [
+      'http://127.0.0.1:11434/v1',
+      'http://localhost:11434/v1',
+      'http://127.0.0.1:1234/v1',
+      'http://localhost:1234/v1',
+      'http://127.0.0.1:8080/v1',
+      'http://localhost:8080/v1',
+    ];
+    for (const baseUrl of candidates) {
+      try {
+        const models = await providerListModels(baseUrl, undefined, 2500);
+        return c.json({ baseUrl, models, count: models.length });
+      } catch {
+        /* try the next candidate */
+      }
+    }
+    return c.json(
+      {
+        error:
+          'No local provider answered on the usual ports (Ollama :11434, LM Studio :1234, llama.cpp :8080). Start one and use Test connection.',
+      },
+      404,
+    );
+  });
   app.post('/api/tasks', async (c) => {
     const parsed = z
       .object({
@@ -158,7 +509,11 @@ export function createApp({
           400,
         );
       try {
-        platform.workspace.requireThread(parsed.data.threadId);
+        platform.workspace.requireThread(
+          parsed.data.threadId,
+          undefined,
+          c.get('user')?.id,
+        );
       } catch {
         return c.json(
           { error: 'Conversation is not owned by this workspace.' },
@@ -169,6 +524,7 @@ export function createApp({
     const task = store.createTask(
       parsed.data.prompt,
       parsed.data.intervalSeconds,
+      c.get('user')?.id,
     );
     if (platform && parsed.data.threadId)
       platform.workspace.bindTask(task.id, parsed.data.threadId);
@@ -176,7 +532,9 @@ export function createApp({
   });
   app.get('/api/tasks/:id', (c) => {
     const detail = store.detail(c.req.param('id'));
-    return detail ? c.json(detail) : c.json({ error: 'Task not found.' }, 404);
+    return detail && ownedTask(c, detail.task.id)
+      ? c.json(detail)
+      : c.json({ error: 'Task not found.' }, 404);
   });
   app.post('/api/tasks/:id/actions', async (c) => {
     const parsed = z
@@ -186,6 +544,8 @@ export function createApp({
     if (!parsed.success) return c.json({ error: 'Unknown task action.' }, 400);
     if (parsed.data.action === 'run' && !store.settings().researchAllowed)
       return c.json({ error: 'Research is disabled in Settings.' }, 403);
+    if (!ownedTask(c, c.req.param('id')))
+      return c.json({ error: 'Task not found.' }, 404);
     const task = store.action(c.req.param('id'), parsed.data.action);
     if (parsed.data.action !== 'run') runner.abort(c.req.param('id'));
     return task ? c.json(task) : c.json({ error: 'Task not found.' }, 404);
@@ -200,11 +560,14 @@ export function createApp({
         { error: 'Repeat interval must be 60 seconds to one year, or null.' },
         400,
       );
+    if (!ownedTask(c, c.req.param('id')))
+      return c.json({ error: 'Task not found.' }, 404);
     const task = store.schedule(c.req.param('id'), parsed.data.intervalSeconds);
     return task ? c.json(task) : c.json({ error: 'Task not found.' }, 404);
   });
   app.delete('/api/tasks/:id', (c) => {
     const id = c.req.param('id');
+    if (!ownedTask(c, id)) return c.json({ error: 'Task not found.' }, 404);
     runner.abort(id);
     if (platform) platform.workspace.unbindTask(id);
     const deleted = store.deleteTask(id);
@@ -213,6 +576,11 @@ export function createApp({
       : c.json({ error: 'Task not found.' }, 404);
   });
   app.patch('/api/settings', async (c) => {
+    // Server-wide settings (API keys, models, permissions) are the
+    // owner's levers; members cannot change them.
+    const actor = c.get('user');
+    if (auth && auth.userCount() > 0 && actor?.role !== 'owner')
+      return c.json({ error: 'Only the owner can change these settings.' }, 403);
     const parsed = z
       .object({
         name: z.string().trim().min(1).max(40).optional(),
@@ -221,6 +589,8 @@ export function createApp({
         memoryAllowed: z.boolean().optional(),
         model: z.string().trim().max(120).nullable().optional(),
         reasoningEffort: z.string().trim().max(50).nullable().optional(),
+        customBaseUrl: z.string().trim().max(500).nullable().optional(),
+        customApiKey: z.string().trim().max(500).nullable().optional(),
         voiceProvider: z.string().trim().max(50).nullable().optional(),
         voiceModel: z.string().trim().max(100).nullable().optional(),
         voiceName: z.string().trim().max(50).nullable().optional(),
@@ -232,6 +602,15 @@ export function createApp({
         codingEnabled: z.boolean().optional(),
         codingPermissions: z.string().max(4096).nullable().optional(),
         opencodeVariant: z.string().trim().max(50).nullable().optional(),
+        allowSignups: z.boolean().optional(),
+        computerEnvironment: z.string().trim().max(50).nullable().optional(),
+        voiceTelephonyProvider: z.string().trim().max(50).nullable().optional(),
+        whatsappPhoneNumberId: z.string().trim().max(100).nullable().optional(),
+        whatsappAccessToken: z.string().trim().max(256).nullable().optional(),
+        whatsappVerifyToken: z.string().trim().max(256).nullable().optional(),
+        twilioAccountSid: z.string().trim().max(100).nullable().optional(),
+        twilioAuthToken: z.string().trim().max(256).nullable().optional(),
+        twilioPhoneNumber: z.string().trim().max(50).nullable().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null));
@@ -252,7 +631,9 @@ export function createApp({
   });
   app.get('/api/memories', (c) => {
     const category = c.req.query('category');
-    return c.json(store.memories(category || undefined));
+    return c.json(
+      store.memories(category || undefined, c.get('user')?.id),
+    );
   });
   app.post('/api/memories', async (c) => {
     const parsed = z
@@ -268,7 +649,12 @@ export function createApp({
         400,
       );
     return c.json(
-      store.saveMemory(parsed.data.text, undefined, parsed.data.category),
+      store.saveMemory(
+        parsed.data.text,
+        undefined,
+        parsed.data.category,
+        c.get('user')?.id,
+      ),
       201,
     );
   });
@@ -285,22 +671,37 @@ export function createApp({
         { error: 'Memory must be between 1 and 2,000 characters.' },
         400,
       );
-    if (!store.memories().some((m) => m.id === c.req.param('id')))
+    const actorId = c.get('user')?.id;
+    if (
+      !store
+        .memories(undefined, actorId)
+        .some((m) => m.id === c.req.param('id'))
+    )
       return c.json({ error: 'Memory not found.' }, 404);
     return c.json(
       store.saveMemory(
         parsed.data.text,
         c.req.param('id'),
         parsed.data.category,
+        actorId,
       ),
     );
   });
-  app.delete('/api/memories/:id', (c) =>
-    store.deleteMemory(c.req.param('id'))
+  app.delete('/api/memories/:id', (c) => {
+    const actorId = c.get('user')?.id;
+    if (
+      !store
+        .memories(undefined, actorId)
+        .some((m) => m.id === c.req.param('id'))
+    )
+      return c.json({ error: 'Memory not found.' }, 404);
+    return store.deleteMemory(c.req.param('id'))
       ? c.json({ ok: true })
-      : c.json({ error: 'Memory not found.' }, 404),
+      : c.json({ error: 'Memory not found.' }, 404);
+  });
+  app.get('/api/memories/graph', (c) =>
+    c.json(store.memoryGraph(c.get('user')?.id)),
   );
-  app.get('/api/memories/graph', (c) => c.json(store.memoryGraph()));
   app.post('/api/files', async (c) => {
     const form = await c.req.parseBody({ all: true }).catch(() => null);
     const files = Object.values(form ?? {}).filter(
@@ -313,6 +714,19 @@ export function createApp({
     const threadId = Object.values(form ?? {}).find(
       (entry) => typeof entry === 'string',
     ) as string | undefined;
+    if (threadId)
+      try {
+        platform?.workspace.requireThread(
+          threadId,
+          undefined,
+          c.get('user')?.id,
+        );
+      } catch {
+        return c.json(
+          { error: 'Conversation is not owned by this workspace.' },
+          403,
+        );
+      }
     const saved = [];
     for (const file of files) {
       if (file.size > MAX_UPLOAD_BYTES) {

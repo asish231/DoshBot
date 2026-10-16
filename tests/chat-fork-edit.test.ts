@@ -14,7 +14,11 @@ function fixture() {
   return { workspace, dot };
 }
 
-/** One turn of a conversation: a run holding user + assistant messages. */
+/**
+ * One turn of a conversation. Run rows are full conversation snapshots —
+ * each new row repeats the whole history plus the turn's two messages —
+ * mirroring how the runner persists threads.
+ */
 function addTurn(
   workspace: WorkspaceStore,
   threadId: string,
@@ -23,6 +27,10 @@ function addTurn(
   const userId = `user-${n}`;
   const assistantId = `assistant-${n}`;
   const runId = `run-${n}`;
+  const previous = workspace.threadRuns(threadId).at(-1);
+  const history = previous
+    ? (JSON.parse(previous.messages) as Array<unknown>)
+    : [];
   workspace.saveThreadRun({
     id: runId,
     threadId,
@@ -30,12 +38,20 @@ function addTurn(
     parentRunId: null,
     events: '[]',
     messages: JSON.stringify([
+      ...history,
       { id: userId, role: 'user', content: `Message ${n}` },
       { id: assistantId, role: 'assistant', content: `Reply ${n}` },
     ]),
     createdAt: Date.now() + n,
   });
   return { userId, assistantId, runId };
+}
+
+function ids(workspace: WorkspaceStore, threadId: string): string[] {
+  const last = workspace.threadRuns(threadId).at(-1);
+  return (
+    JSON.parse(last?.messages ?? '[]') as Array<{ id: string }>
+  ).map((m) => m.id);
 }
 
 describe('fork', () => {
@@ -73,13 +89,16 @@ describe('fork', () => {
     const t2 = addTurn(f.workspace, 'thread', 2);
     addTurn(f.workspace, 'thread', 3);
 
-    // Fork at the assistant reply of turn 2: turns 1-2 in, run 2 truncated
-    // after the assistant message, turn 3 gone.
+    // Fork at the assistant reply of turn 2: the fork's transcript ends
+    // there; turn 3 never made it in.
     const forked = f.workspace.forkThread('thread', t2.assistantId);
-    const runs = f.workspace.threadRuns(forked.id);
-    expect(runs).toHaveLength(2);
-    const last = JSON.parse(runs[1]!.messages) as Array<{ id: string }>;
-    expect(last.map((m) => m.id)).toEqual(['user-2', 'assistant-2']);
+    expect(f.workspace.threadRuns(forked.id)).toHaveLength(2);
+    expect(ids(f.workspace, forked.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-2',
+      'assistant-2',
+    ]);
   });
 
   it('forking from an unknown message safely copies the whole conversation', () => {
@@ -101,36 +120,39 @@ describe('fork', () => {
 });
 
 describe('edit (edit-and-resend semantics)', () => {
-  it('rewrites the message and drops later turns', () => {
+  it('drops the target and everything after; returns the tail for undo', () => {
     const f = fixture();
     addTurn(f.workspace, 'thread', 1);
     const t2 = addTurn(f.workspace, 'thread', 2);
     addTurn(f.workspace, 'thread', 3);
 
+    // The corrected content is re-sent by the client as a fresh message;
+    // the server just removes the target + tail from every snapshot.
     const result = f.workspace.editThreadMessage(
       'thread',
       t2.userId,
       'Message 2 (corrected)',
     );
     expect(result.edited).toBe(true);
-    expect(result.truncatedRuns).toBe(1); // run 3 dropped
-
-    const runs = f.workspace.threadRuns('thread');
-    expect(runs).toHaveLength(2);
-    const edited = JSON.parse(runs[1]!.messages) as Array<{
-      id: string;
-      content: string;
-    }>;
-    expect(edited[0]!.content).toBe('Message 2 (corrected)');
-    expect(edited[1]!.content).toBe('Reply 2'); // assistant reply intact
+    expect(result.removed.map((m) => m.id)).toEqual([
+      'user-2',
+      'assistant-2',
+      'user-3',
+      'assistant-3',
+    ]);
+    expect(ids(f.workspace, 'thread')).toEqual(['user-1', 'assistant-1']);
   });
 
-  it('editing the last turn truncates nothing', () => {
+  it('editing the last turn removes just that turn', () => {
     const f = fixture();
     addTurn(f.workspace, 'thread', 1);
     const t2 = addTurn(f.workspace, 'thread', 2);
     const result = f.workspace.editThreadMessage('thread', t2.userId, 'fixed');
-    expect(result.truncatedRuns).toBe(0);
+    expect(result.removed.map((m) => m.id)).toEqual([
+      'user-2',
+      'assistant-2',
+    ]);
+    expect(ids(f.workspace, 'thread')).toEqual(['user-1', 'assistant-1']);
   });
 
   it('throws for unknown messages', () => {
@@ -150,20 +172,26 @@ describe('revert', () => {
     addTurn(f.workspace, 'thread', 3);
 
     const removed = f.workspace.revertThreadToMessage('thread', t2.assistantId);
-    expect(removed).toBe(1); // run 3 removed, runs 1-2 remain intact
-    expect(f.workspace.threadRuns('thread')).toHaveLength(2);
-    const last = JSON.parse(
-      f.workspace.threadRuns('thread')[1]!.messages,
-    ) as Array<{ id: string }>;
-    expect(last.map((m) => m.id)).toEqual(['user-2', 'assistant-2']);
+    expect(removed.map((m) => m.id)).toEqual(['user-3', 'assistant-3']);
+    expect(ids(f.workspace, 'thread')).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-2',
+      'assistant-2',
+    ]);
   });
 
-  it('reverting the last turn removes nothing', () => {
+  it('reverting to an early message keeps only that message', () => {
     const f = fixture();
     const t1 = addTurn(f.workspace, 'thread', 1);
     addTurn(f.workspace, 'thread', 2);
-    expect(f.workspace.revertThreadToMessage('thread', t1.userId)).toBe(1);
-    expect(f.workspace.threadRuns('thread')).toHaveLength(1);
+    const removed = f.workspace.revertThreadToMessage('thread', t1.userId);
+    expect(removed.map((m) => m.id)).toEqual([
+      'assistant-1',
+      'user-2',
+      'assistant-2',
+    ]);
+    expect(ids(f.workspace, 'thread')).toEqual(['user-1']);
   });
 
   it('throws for unknown messages', () => {
@@ -171,5 +199,26 @@ describe('revert', () => {
     expect(() =>
       f.workspace.revertThreadToMessage('thread', 'nope'),
     ).toThrow(/not found/i);
+  });
+});
+
+describe('restore (undo for revert/edit)', () => {
+  it('appends the removed tail back as a fresh snapshot row', () => {
+    const f = fixture();
+    addTurn(f.workspace, 'thread', 1);
+    const t2 = addTurn(f.workspace, 'thread', 2);
+    addTurn(f.workspace, 'thread', 3);
+
+    const tail = f.workspace.revertThreadToMessage('thread', t2.assistantId);
+    const result = f.workspace.restoreThreadMessages('thread', tail);
+    expect(result.restored).toBe(2);
+    expect(ids(f.workspace, 'thread')).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-2',
+      'assistant-2',
+      'user-3',
+      'assistant-3',
+    ]);
   });
 });

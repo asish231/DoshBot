@@ -1,6 +1,6 @@
 import { ComputerService } from './computer-service.js';
 import { PageService } from './page-service.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   CopilotKitIntelligence,
   CopilotRuntime,
@@ -106,10 +106,20 @@ export class Platform {
     const runtime = this.intelligence
       ? new CopilotRuntime({
           intelligence: this.intelligence,
-          identifyUser: async () => ({
-            id: workspace.ownerId,
-            name: 'OpenDots owner',
-          }),
+          // The runtime stores every thread under the identified user, so
+          // this must resolve the actual signed-in account per request —
+          // not a single hardcoded identity — or every user's chats
+          // would pile up under one provider user.
+          identifyUser: async (request: Request) => {
+            const bearer =
+              request.headers.get('authorization')?.replace(
+                /^Bearer /,
+                '',
+              ) ?? '';
+            const identity = this.resolveRequestIdentity(bearer);
+            if (identity) return identity;
+            return { id: workspace.ownerId, name: 'OpenDots owner' };
+          },
           agents: async (): Promise<Record<string, AbstractAgent>> =>
             Object.fromEntries(
               workspace
@@ -227,15 +237,16 @@ export class Platform {
       }
     }
   }
-  async createConversation(dotId: string, title: string) {
+  async createConversation(dotId: string, title: string, ownerId?: string) {
     this.requireReady();
     if (!this.workspace.dot(dotId)) throw new Error('Dot not found.');
     const id = randomUUID();
+    const threadOwner = ownerId ?? this.workspace.ownerId;
     if (this.intelligence) {
       try {
         await this.intelligence.createThread({
           threadId: id,
-          userId: this.workspace.ownerId,
+          userId: threadOwner,
           agentId: dotId,
           name: title,
         });
@@ -245,16 +256,16 @@ export class Platform {
         );
       }
     }
-    return this.workspace.bindThread(id, dotId, title);
+    return this.workspace.bindThread(id, dotId, title, threadOwner);
   }
   async history(threadId: string): Promise<string> {
     this.requireReady();
-    this.workspace.requireThread(threadId);
+    const thread = this.workspace.requireThread(threadId);
     let messages: { role: string; content?: unknown }[] = [];
     if (this.intelligence) {
       const history = await this.intelligence.getThreadMessages({
         threadId,
-        userId: this.workspace.ownerId,
+        userId: thread.ownerId,
       });
       messages = history.messages;
     } else if (this.runner) {
@@ -270,7 +281,7 @@ export class Platform {
       .join('\n')
       .slice(-12000);
   }
-  async handle(request: Request): Promise<Response> {
+  async handle(request: Request, ownerId?: string): Promise<Response> {
     if (!this.handler)
       return Response.json(
         { error: 'Setup required: INTELLIGENCE_API_KEY.' },
@@ -283,7 +294,7 @@ export class Platform {
         .json()
         .catch(() => null);
     try {
-      validateRuntimeScope(request, this.workspace, body);
+      validateRuntimeScope(request, this.workspace, body, ownerId);
     } catch (error) {
       return Response.json(
         {
@@ -307,7 +318,7 @@ export class Platform {
           unknown
         >;
         if (typeof data.name === 'string') {
-          this.workspace.updateThread(threadId, { title: data.name });
+          this.workspace.updateThread(threadId, { title: data.name }, ownerId);
         }
         return Response.json({
           id: threadId,
@@ -316,11 +327,52 @@ export class Platform {
         });
       }
       if (request.method === 'DELETE') {
-        this.workspace.deleteThread(threadId);
+        this.workspace.deleteThread(threadId, ownerId);
         return Response.json({ id: threadId, deleted: true });
       }
     }
     return this.handler.fetch(request);
+  }
+  /**
+   * Resolves a bearer credential to the runtime identity it grants:
+   * a session token maps to its user; the break-glass OWNER_TOKEN maps
+   * to the owner account. Undefined when the credential is absent or
+   * unknown — callers apply their own fallback.
+   */
+  private resolveRequestIdentity(
+    bearer: string,
+  ): { id: string; name: string } | undefined {
+    if (!bearer) return undefined;
+    if (this.config.auth) {
+      const user = this.config.auth.validate(bearer);
+      if (user) return { id: user.id, name: user.displayName };
+      if (this.config.ownerToken) {
+        const expected = Buffer.from(this.config.ownerToken);
+        const supplied = Buffer.from(bearer);
+        if (
+          expected.length === supplied.length &&
+          timingSafeEqual(expected, supplied)
+        ) {
+          const owner = this.config.auth.breakGlassUser();
+          return { id: owner.id, name: owner.displayName };
+        }
+      }
+    }
+    return undefined;
+  }
+  /**
+   * Authorization for a server-side turn on a thread: a short-lived
+   * internal session minted for the thread's owner, so the runtime
+   * records the turn under the same provider identity the browser uses
+   * for that thread. Falls back to the break-glass token when the owner
+   * has no account yet.
+   */
+  private internalTurnHeaders(ownerId: string): Record<string, string> {
+    const token = this.config.auth?.mintInternalToken(ownerId);
+    if (token) return { Authorization: `Bearer ${token}` };
+    return this.config.ownerToken
+      ? { Authorization: `Bearer ${this.config.ownerToken}` }
+      : {};
   }
   async turn(
     threadId: string,
@@ -330,11 +382,24 @@ export class Platform {
   ): Promise<string> {
     this.requireReady();
     const thread = this.workspace.requireThread(threadId);
+    // Local workspaces (INTELLIGENCE_API_KEY=local) run the in-memory
+    // runner, not the cloud Intelligence runtime: server-initiated turns
+    // (voice compute, call receipts, /btw, schedules) execute the Dot
+    // directly and persist into the same conversation.
+    if (this.runner) {
+      const { runLocalTurn } = await import('./local-turn.js');
+      return runLocalTurn({
+        runner: this.runner,
+        agent: new DotAgent(this.store, this.workspace, this.config, thread.dotId),
+        threadId,
+        prompt,
+        signal,
+        metadata,
+      });
+    }
     return runThreadTurn(
       this.config.runtimeUrl,
-      this.config.ownerToken
-        ? { Authorization: `Bearer ${this.config.ownerToken}` }
-        : {},
+      this.internalTurnHeaders(thread.ownerId),
       thread.dotId,
       threadId,
       prompt,
@@ -352,20 +417,22 @@ export class Platform {
     threadId: string,
     question: string,
     signal: AbortSignal,
+    ownerId?: string,
   ): Promise<string> {
-    const thread = this.workspace.requireThread(threadId);
+    const thread = this.workspace.requireThread(threadId, undefined, ownerId);
     const tempId = `btw-${randomUUID()}`;
     this.workspace.bindThread(
       tempId,
       thread.dotId,
       `BTW: ${question.slice(0, 80)}`,
+      ownerId,
     );
     try {
       return await this.turn(tempId, question, signal, {
         opendotsSource: 'btw',
       });
     } finally {
-      this.workspace.deleteThread(tempId);
+      this.workspace.deleteThread(tempId, ownerId);
     }
   }
 }

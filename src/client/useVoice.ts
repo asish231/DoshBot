@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, authHeaders, getToken } from './api';
+import { resolveVoiceProvider } from '../shared/voice-catalog';
 
 function resampleTo16k(
   audioData: Float32Array,
@@ -109,6 +110,8 @@ export function useVoice(
   );
   const [caption, setCaption] = useState('');
   const [userCaption, setUserCaption] = useState('');
+  const [provider, setProvider] = useState('openai');
+  const [voiceName, setVoiceName] = useState('');
   const session = useRef<SessionData | undefined>(undefined);
   const anchor = useRef(anchorMessageId);
   anchor.current = anchorMessageId;
@@ -261,11 +264,23 @@ export function useVoice(
 
     let stream: MediaStream | undefined;
     try {
-      // Check active voice provider from server settings
+      // Check active voice provider from server settings. The provider may
+      // be unset while VOICE_MODEL names a Gemini (or OpenAI) model, so
+      // infer it from the model — otherwise a Gemini model would be sent
+      // down the OpenAI Realtime path and every call would fail.
       const state = await api<{
-        settings: { voiceProvider?: string | null };
+        settings: {
+          voiceProvider?: string | null;
+          voiceModel?: string | null;
+          voiceName?: string | null;
+        };
       }>('/state').catch(() => null);
-      const provider = state?.settings?.voiceProvider || 'openai';
+      const provider = resolveVoiceProvider(
+        state?.settings?.voiceProvider,
+        state?.settings?.voiceModel,
+      );
+      setProvider(provider);
+      setVoiceName(state?.settings?.voiceName || '');
 
       if (provider === 'browser') {
         throw new Error(
@@ -303,10 +318,28 @@ export function useVoice(
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsToken = getToken();
-        const tokenParam = wsToken
-          ? `&token=${encodeURIComponent(wsToken)}`
-          : '';
-        const wsUrl = `${protocol}//${window.location.host}/api/voice/gemini-live?threadId=${encodeURIComponent(threadId)}${tokenParam}`;
+        // Prefer a single-use ticket: the long-lived owner token never
+        // appears in the URL. Falls back to the token param for older
+        // servers without the ticket endpoint.
+        let authParam = '';
+        try {
+          const ticket = await api<{ ticket: string }>(
+            '/voice/ws-ticket',
+            'POST',
+            {},
+          );
+          if (ticket?.ticket)
+            authParam = `&ticket=${encodeURIComponent(ticket.ticket)}`;
+        } catch {
+          /* no ticket endpoint — fall back to the legacy token param */
+        }
+        if (!authParam && wsToken)
+          authParam = `&token=${encodeURIComponent(wsToken)}`;
+        if (attempt !== generation.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        const wsUrl = `${protocol}//${window.location.host}/api/voice/gemini-live?threadId=${encodeURIComponent(threadId)}${authParam}`;
         const ws = new WebSocket(wsUrl);
 
         const activeSources: AudioBufferSourceNode[] = [];
@@ -369,6 +402,10 @@ export function useVoice(
 
           if (data.type === 'ready') {
             setPhase('listening');
+          }
+
+          if (data.type === 'thinking') {
+            setPhase('thinking');
           }
 
           if (data.type === 'audio' && typeof data.data === 'string') {
@@ -654,6 +691,37 @@ export function useVoice(
     setSpeakerMuted(next);
   };
 
+  /**
+   * Switches the call voice. The setting is saved immediately; on
+   * OpenAI Realtime the live session is updated too, so the new voice
+   * speaks the very next sentence. Gemini bakes the voice into its
+   * session setup, so there it applies on the next call.
+   */
+  const changeVoice = async (name: string) => {
+    setVoiceName(name);
+    try {
+      await api('/settings', 'PATCH', { voiceName: name });
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : 'Could not save the voice choice.',
+      );
+      return;
+    }
+    const current = session.current;
+    if (current?.type === 'webrtc' && current.channel.readyState === 'open') {
+      try {
+        current.channel.send(
+          JSON.stringify({
+            type: 'session.update',
+            session: { audio: { output: { voice: name } } },
+          }),
+        );
+      } catch {
+        /* the channel closed; the saved setting applies next call */
+      }
+    }
+  };
+
   return {
     status,
     error,
@@ -665,6 +733,9 @@ export function useVoice(
     phase,
     caption,
     userCaption,
+    provider,
+    voiceName,
+    changeVoice,
     toggleMute,
     toggleSpeaker,
   };

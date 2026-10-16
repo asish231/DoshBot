@@ -17,6 +17,7 @@ import type {
   Connector,
 } from '../shared/types';
 import type { Skill, SkillSummary } from '../shared/skills';
+import { voicesForProvider } from '../shared/voice-catalog';
 import { api } from './api';
 export type SettingsTab =
   | 'setup'
@@ -487,6 +488,22 @@ export function WorkspaceDialog({
     freeModels: { id: string; name: string; provider?: string }[];
     variants: string[];
   } | null>(null);
+  const [codexStatus, setCodexStatus] = useState<{
+    available: boolean;
+    binaryPath?: string;
+    version?: string;
+  } | null>(null);
+  // Local/custom OpenAI-compatible provider (Ollama, LM Studio, …).
+  const [customBaseUrl, setCustomBaseUrl] = useState<string>(
+    state.settings.customBaseUrl || '',
+  );
+  const [customApiKey, setCustomApiKey] = useState<string>('');
+  const [customApiKeyDirty, setCustomApiKeyDirty] = useState(false);
+  const [providerTest, setProviderTest] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+  const [providerTesting, setProviderTesting] = useState(false);
   const [dirVerifyStatus, setDirVerifyStatus] = useState<string>('');
   const [browsePath, setBrowsePath] = useState('');
   const [browseParent, setBrowseParent] = useState('');
@@ -522,6 +539,32 @@ export function WorkspaceDialog({
     } finally {
       setBrowseLoading(false);
     }
+  };
+
+  // Native OS folder picker (Finder / File Explorer). Browsers hide the
+  // absolute path, so the picked name is a hint — the owner confirms the
+  // matching server path via Browse… (starts at home when blank).
+  const browseNativeInputRef = useRef<HTMLInputElement>(null);
+  const handleNativeFolderPick = async () => {
+    const w = window as unknown as {
+      showDirectoryPicker?: () => Promise<{ name?: string }>;
+    };
+    if (typeof w.showDirectoryPicker === 'function') {
+      try {
+        const handle = await w.showDirectoryPicker();
+        if (handle?.name && String(handle.name).trim()) {
+          setDirVerifyStatus(
+            `Picked “${String(handle.name).trim()}” on this device — now select the same folder via Browse… (starts at home when blank) or type its full path, then Verify & Connect.`,
+          );
+        }
+      } catch {
+        /* the owner cancelled the native dialog */
+      }
+      setBrowseOpen(true);
+      void loadBrowse();
+      return;
+    }
+    browseNativeInputRef.current?.click();
   };
 
   // Dual-layer memory state
@@ -704,7 +747,11 @@ export function WorkspaceDialog({
   })();
 
   useEffect(() => {
-    void api<{ models?: string[]; opencode?: typeof opencodeStatus }>('/models')
+    void api<{
+      models?: string[];
+      opencode?: NonNullable<typeof opencodeStatus>;
+      codex?: NonNullable<typeof codexStatus>;
+    }>('/models')
       .then((data) => {
         if (data && Array.isArray(data.models) && data.models.length > 0) {
           setModelOptions(data.models);
@@ -712,11 +759,69 @@ export function WorkspaceDialog({
         if (data && data.opencode) {
           setOpencodeStatus(data.opencode);
         }
+        if (data && data.codex) {
+          setCodexStatus(data.codex);
+        }
       })
       .catch(() => {
         /* model list unavailable; fallback list stays in place */
       });
   }, []);
+
+  const testCustomProvider = async (baseUrl: string, apiKey?: string) => {
+    setProviderTesting(true);
+    setProviderTest(null);
+    try {
+      const res = await api<{ models: string[]; count: number }>(
+        '/provider/test',
+        'POST',
+        { baseUrl, ...(apiKey?.trim() ? { apiKey: apiKey.trim() } : {}) },
+      );
+      const names = res.models.slice(0, 5).join(', ');
+      setProviderTest({
+        ok: true,
+        message: `Connected — ${res.count} model(s)${names ? `: ${names}${res.count > 5 ? '…' : ''}` : ''}. Save to use it.`,
+      });
+    } catch (error) {
+      setProviderTest({
+        ok: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Could not reach the endpoint.',
+      });
+    } finally {
+      setProviderTesting(false);
+    }
+  };
+
+  const detectCustomProvider = async () => {
+    setProviderTesting(true);
+    setProviderTest(null);
+    try {
+      const res = await api<{ baseUrl: string; models: string[]; count: number }>(
+        '/provider/detect',
+        'POST',
+        {},
+      );
+      setCustomBaseUrl(res.baseUrl);
+      const names = res.models.slice(0, 5).join(', ');
+      setProviderTest({
+        ok: true,
+        message: `Found ${res.baseUrl} — ${res.count} model(s)${names ? `: ${names}${res.count > 5 ? '…' : ''}` : ''}. Save to use it.`,
+      });
+    } catch (error) {
+      setProviderTest({
+        ok: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'No local provider found.',
+      });
+    } finally {
+      setProviderTesting(false);
+    }
+  };
 
   const prefillDirectory = useRef(false);
   useEffect(() => {
@@ -880,6 +985,10 @@ export function WorkspaceDialog({
                   : {}),
                 telegramAllowedUsers: telegramAllowedUsers.trim() || null,
                 connectors: JSON.stringify(connectors),
+                customBaseUrl: customBaseUrl.trim() || null,
+                ...(customApiKeyDirty
+                  ? { customApiKey: customApiKey.trim() || null }
+                  : {}),
                 codingDirectory: codingDirectory.trim() || null,
                 codingEnabled,
                 codingPermissions: JSON.stringify({
@@ -1662,6 +1771,144 @@ export function WorkspaceDialog({
                     </div>
                   )}
 
+                  <div
+                    className="callout-card"
+                    style={{
+                      marginBottom: '12px',
+                      padding: '12px 14px',
+                      background: 'var(--surface, #ffffff)',
+                      border: '2px solid #000',
+                      borderRadius: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      <strong style={{ fontSize: '12px', color: 'var(--ink, #1c1c1e)' }}>
+                        Local provider
+                      </strong>
+                      <span
+                        className="line-option-tag"
+                        style={{
+                          color: customBaseUrl.trim()
+                            ? 'var(--blue-dark)'
+                            : 'var(--muted, #4a6572)',
+                        }}
+                      >
+                        {customBaseUrl.trim() ? 'Connected' : 'Not connected'}
+                      </span>
+                    </div>
+                    <p
+                      className="muted"
+                      style={{ margin: '0 0 8px', fontSize: '11px' }}
+                    >
+                      Point DoshBot at an OpenAI-compatible endpoint on your
+                      network — Ollama, LM Studio, llama.cpp, or any self-hosted
+                      gateway. When set, every turn (chat, voice, schedules) uses
+                      it instead of the .env endpoint. Auto-detect scans the
+                      usual local ports.
+                    </p>
+                    <input
+                      type="text"
+                      value={customBaseUrl}
+                      placeholder="http://127.0.0.1:11434/v1"
+                      onChange={(e) => {
+                        setCustomBaseUrl(e.target.value);
+                        setProviderTest(null);
+                      }}
+                      style={{
+                        width: '100%',
+                        fontFamily: 'monospace',
+                        fontSize: '12px',
+                        marginBottom: '8px',
+                      }}
+                    />
+                    <input
+                      type="password"
+                      value={customApiKey}
+                      placeholder={
+                        state.settings.secrets?.customApiKey
+                          ? 'API key saved (enter a new one to replace)'
+                          : 'API key (optional — Ollama / local usually needs none)'
+                      }
+                      autoComplete="new-password"
+                      onChange={(e) => {
+                        setCustomApiKey(e.target.value);
+                        setCustomApiKeyDirty(true);
+                        setProviderTest(null);
+                      }}
+                      style={{
+                        width: '100%',
+                        fontFamily: 'monospace',
+                        fontSize: '12px',
+                        marginBottom: '8px',
+                      }}
+                    />
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: '8px',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="button"
+                        disabled={providerTesting}
+                        onClick={() => void detectCustomProvider()}
+                        style={{ fontSize: '11.5px', padding: '6px 14px' }}
+                      >
+                        {providerTesting ? 'Scanning…' : 'Auto-detect'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={providerTesting || !customBaseUrl.trim()}
+                        onClick={() =>
+                          void testCustomProvider(customBaseUrl, customApiKey)
+                        }
+                        style={{ fontSize: '11.5px', padding: '6px 14px' }}
+                      >
+                        {providerTesting ? 'Testing…' : 'Test connection'}
+                      </button>
+                      {customBaseUrl.trim() && (
+                        <button
+                          type="button"
+                          disabled={providerTesting}
+                          onClick={() => {
+                            setCustomBaseUrl('');
+                            setCustomApiKey('');
+                            setCustomApiKeyDirty(true);
+                            setProviderTest({
+                              ok: true,
+                              message:
+                                'Cleared — Save to go back to the .env endpoint.',
+                            });
+                          }}
+                          style={{ fontSize: '11.5px', padding: '6px 14px' }}
+                        >
+                          Disconnect
+                        </button>
+                      )}
+                    </div>
+                    {providerTest && (
+                      <p
+                        style={{
+                          margin: '8px 0 0',
+                          fontSize: '11px',
+                          color: providerTest.ok ? '#4a6572' : '#991b1b',
+                        }}
+                      >
+                        {providerTest.message}
+                      </p>
+                    )}
+                  </div>
+
                   <label className="field-label" style={{ margin: '0 0 6px' }}>
                     Default Model
                   </label>
@@ -1895,7 +2142,7 @@ export function WorkspaceDialog({
                       <input
                         type="text"
                         value={codingDirectory}
-                        placeholder="/Users/username/my-project"
+                        placeholder="No folder — pure chat until you connect one"
                         onChange={(e) => {
                           setCodingDirectory(e.target.value);
                           setDirVerifyStatus('');
@@ -1906,6 +2153,54 @@ export function WorkspaceDialog({
                           fontSize: '12px',
                         }}
                       />
+                      <input
+                        ref={(el) => {
+                          browseNativeInputRef.current = el;
+                          if (el) el.setAttribute('webkitdirectory', '');
+                        }}
+                        type="file"
+                        multiple
+                        aria-hidden="true"
+                        tabIndex={-1}
+                        // Visually hidden but NOT display:none: Safari ignores
+                        // programmatic .click() on display:none file inputs,
+                        // so the OS folder dialog would never open there.
+                        style={{
+                          position: 'fixed',
+                          width: 1,
+                          height: 1,
+                          opacity: 0,
+                          pointerEvents: 'none',
+                        }}
+                        onChange={(e) => {
+                          const files = e.target.files;
+                          if (browseNativeInputRef.current)
+                            browseNativeInputRef.current.value = '';
+                          if (!files || files.length === 0) return;
+                          const top =
+                            (
+                              files[0].webkitRelativePath ||
+                              files[0].name ||
+                              ''
+                            ).split('/')[0] || '';
+                          if (top.trim()) {
+                            setDirVerifyStatus(
+                              `Picked “${top.trim()}” on this device — now select the same folder via Browse… (starts at home when blank) or type its full path, then Verify & Connect.`,
+                            );
+                          }
+                          setBrowseOpen(true);
+                          void loadBrowse();
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleNativeFolderPick()}
+                        disabled={browseLoading}
+                        title="Open your OS folder picker (Finder / File Explorer)"
+                        style={{ fontSize: '11.5px', padding: '6px 14px' }}
+                      >
+                        Choose…
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
@@ -1926,6 +2221,15 @@ export function WorkspaceDialog({
                         className="button"
                         onClick={async () => {
                           try {
+                            if (!codingDirectory.trim()) {
+                              await api('/workspace/directory', 'POST', {
+                                directory: null,
+                              });
+                              setDirVerifyStatus(
+                                'Folder disconnected — pure chat, no local files.',
+                              );
+                              return;
+                            }
                             await api('/workspace/directory', 'POST', {
                               directory: codingDirectory,
                             });
@@ -2223,6 +2527,50 @@ export function WorkspaceDialog({
                         </select>
                       </div>
                     )}
+                  </div>
+
+                  <div
+                    className="callout-card"
+                    style={{
+                      padding: '14px 16px',
+                      borderRadius: 0,
+                      background: 'var(--surface, #ffffff)',
+                      border: '2px solid #000',
+                      marginTop: '12px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      <strong style={{ fontSize: '12px' }}>
+                        Codex Local Engine
+                      </strong>
+                      <span
+                        className="line-option-tag"
+                        style={{
+                          color: codexStatus?.available ? '#4a6572' : '#888',
+                        }}
+                      >
+                        {codexStatus == null
+                          ? 'Checking…'
+                          : codexStatus.available
+                            ? `Available${codexStatus.version ? ` · ${codexStatus.version}` : ''}`
+                            : 'Not Installed'}
+                      </span>
+                    </div>
+                    <p
+                      className="muted"
+                      style={{ margin: 0, fontSize: '11px' }}
+                    >
+                      {codexStatus?.available
+                        ? `Connected to ${codexStatus.binaryPath}. The Dot can delegate repo work to Codex (codex_task) — cloud account or fully local via Ollama / LM Studio.`
+                        : 'Codex CLI not found on this machine. Install it to give your Dots a second local coding engine.'}
+                    </p>
                   </div>
                 </>
               )}
@@ -3727,26 +4075,7 @@ export function WorkspaceDialog({
 
               {settingsTab === 'voice' &&
                 (() => {
-                  const geminiVoices = [
-                    'Puck',
-                    'Charon',
-                    'Kore',
-                    'Fenrir',
-                    'Aoede',
-                  ];
-                  const openaiVoices = [
-                    'marin',
-                    'alloy',
-                    'echo',
-                    'shimmer',
-                    'ash',
-                    'ballad',
-                    'coral',
-                    'sage',
-                    'verse',
-                  ];
-                  const currentVoices =
-                    voiceProvider === 'openai' ? openaiVoices : geminiVoices;
+                  const currentVoices = voicesForProvider(voiceProvider);
 
                   // ── Live model lists from Google AI Docs (October 2026) ──────
                   const geminiLiveModels = [

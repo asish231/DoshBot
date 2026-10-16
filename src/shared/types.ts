@@ -7,6 +7,11 @@ export interface Settings {
   memoryAllowed: boolean;
   model?: string | null;
   reasoningEffort?: string | null;
+  /** OpenAI-compatible custom/local endpoint base URL (e.g. a local
+   *  provider at http://127.0.0.1:11434/v1). Overrides OPENAI_BASE_URL. */
+  customBaseUrl?: string | null;
+  /** API key for the custom endpoint. Stored secret; redacted in API responses. */
+  customApiKey?: string | null;
   voiceProvider?: string | null;
   voiceModel?: string | null;
   voiceName?: string | null;
@@ -18,7 +23,8 @@ export interface Settings {
   /** JSON string: Connector[] — Local stdio and remote MCP servers.
    *  Per-connector tokens are redacted in API responses ('__saved__' sentinel). */
   connectors?: string | null;
-  /** Active local coding directory path (defaults to process.cwd()) */
+  /** Local coding directory path. Blank (null) by default = pure chat with
+   *  no local file/shell tools; coding tools fall back to process.cwd(). */
   codingDirectory?: string | null;
   /** Folder tools on/off. false = chat without local folder tools (no editor/bash/opencode). Defaults on. */
   codingEnabled?: boolean | null;
@@ -26,11 +32,24 @@ export interface Settings {
   codingPermissions?: string | null;
   /** Reasoning effort variant for OpenCode models ('minimal' | 'low' | 'medium' | 'high' | 'max') */
   opencodeVariant?: string | null;
+  /** Whether new accounts may sign up (owner can disable once the team exists). */
+  allowSignups?: boolean | null;
+  /** CopilotKit computer sandbox environment (e.g. 'alpine' for Apple Silicon). */
+  computerEnvironment?: string | null;
+  /** Telephony voice provider (twilio/telegram/whatsapp); the voice adapter used. */
+  voiceTelephonyProvider?: string | null;
+  whatsappPhoneNumberId?: string | null;
+  whatsappAccessToken?: string | null;
+  whatsappVerifyToken?: string | null;
+  twilioAccountSid?: string | null;
+  twilioAuthToken?: string | null;
+  twilioPhoneNumber?: string | null;
   /** Presence metadata for redacted credentials (computed server-side, never stored). */
   secrets?: SettingsSecrets;
 }
 export interface SettingsSecrets {
   telegramBotToken: boolean;
+  customApiKey: boolean;
   voiceApiKeys: number;
   connectors: number;
 }
@@ -57,6 +76,8 @@ export interface Task {
   error: string | null;
   lease: string | null;
   leaseUntil: number | null;
+  /** Owning account; null on rows created before accounts existed. */
+  ownerId?: string | null;
 }
 export interface Source {
   title: string;

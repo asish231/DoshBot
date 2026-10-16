@@ -25,7 +25,7 @@ const defaults: Settings = {
   paused: false,
   researchAllowed: true,
   memoryAllowed: true,
-  codingDirectory: process.cwd(),
+  codingDirectory: null,
   codingPermissions: JSON.stringify({ bash: 'auto', edits: 'auto' }),
   opencodeVariant: 'high',
 };
@@ -37,13 +37,23 @@ export class Store {
   readonly skills: SkillsStore | null;
   /** Directory holding uploaded file blobs. */
   private readonly uploadsDir: string;
-  constructor(path: string, options?: { skillsDir?: string; uploadsDir?: string }) {
+  /** Identity owning rows created before accounts existed. */
+  private readonly bootstrapOwnerId: string;
+  constructor(
+    path: string,
+    options?: {
+      skillsDir?: string;
+      uploadsDir?: string;
+      ownerId?: string;
+    },
+  ) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.skills = options?.skillsDir
       ? new SkillsStore(options.skillsDir)
       : null;
     this.uploadsDir = options?.uploadsDir ?? join(dirname(path), 'uploads');
+    this.bootstrapOwnerId = options?.ownerId ?? 'opendots-owner';
     mkdirSync(this.uploadsDir, { recursive: true });
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
@@ -65,6 +75,29 @@ export class Store {
         .some((col: { name?: string }) => col.name === 'category')
     ) {
       this.db.exec('ALTER TABLE memories ADD COLUMN category TEXT');
+    }
+    // Per-user ownership: existing rows belong to the bootstrap owner.
+    if (
+      !this.db
+        .prepare('PRAGMA table_info(memories)')
+        .all()
+        .some((col: { name?: string }) => col.name === 'ownerId')
+    ) {
+      this.db.exec('ALTER TABLE memories ADD COLUMN ownerId TEXT');
+      this.db
+        .prepare('UPDATE memories SET ownerId=? WHERE ownerId IS NULL')
+        .run(this.bootstrapOwnerId);
+    }
+    if (
+      !this.db
+        .prepare('PRAGMA table_info(tasks)')
+        .all()
+        .some((col: { name?: string }) => col.name === 'ownerId')
+    ) {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN ownerId TEXT');
+      this.db
+        .prepare('UPDATE tasks SET ownerId=? WHERE ownerId IS NULL')
+        .run(this.bootstrapOwnerId);
     }
     this.db
       .prepare('INSERT OR IGNORE INTO settings VALUES (1, ?)')
@@ -114,24 +147,34 @@ export class Store {
       return settings;
     });
   }
-  tasks(): Task[] {
-    return this.db
-      .prepare('SELECT * FROM tasks ORDER BY createdAt DESC')
-      .all() as unknown as Task[];
+  tasks(ownerId?: string): Task[] {
+    return (
+      ownerId
+        ? this.db
+            .prepare('SELECT * FROM tasks WHERE ownerId=? ORDER BY createdAt DESC')
+            .all(ownerId)
+        : this.db
+            .prepare('SELECT * FROM tasks ORDER BY createdAt DESC')
+            .all()
+    ) as unknown as Task[];
   }
   task(id: string): Task | undefined {
     return this.db
       .prepare('SELECT * FROM tasks WHERE id=?')
       .get(id) as unknown as Task | undefined;
   }
-  createTask(prompt: string, intervalSeconds: number | null = null): Task {
+  createTask(
+    prompt: string,
+    intervalSeconds: number | null = null,
+    ownerId: string = this.bootstrapOwnerId,
+  ): Task {
     const now = Date.now();
     const id = randomUUID();
     this.db
       .prepare(
-        "INSERT INTO tasks VALUES (?, ?, 'queued', ?, NULL, ?, ?, NULL, NULL, NULL)",
+        "INSERT INTO tasks VALUES (?, ?, 'queued', ?, NULL, ?, ?, NULL, NULL, NULL, ?)",
       )
-      .run(id, prompt, intervalSeconds, now, now);
+      .run(id, prompt, intervalSeconds, now, now, ownerId);
     this.event(id, null, 'Task added to the research queue.');
     return this.task(id)!;
   }
@@ -319,28 +362,34 @@ export class Store {
       this.event(claim.id, claim.lease, error);
     });
   }
-  memories(category?: string): Memory[] {
+  memories(category?: string, ownerId?: string): Memory[] {
+    const ownerClause = ownerId ? ' AND ownerId=?' : '';
     if (category) {
       return this.db
         .prepare(
-          'SELECT * FROM memories WHERE category=? ORDER BY createdAt DESC',
+          `SELECT * FROM memories WHERE category=?${ownerClause} ORDER BY createdAt DESC`,
         )
-        .all(category) as unknown as Memory[];
+        .all(
+          ...(ownerId ? [category, ownerId] : [category]),
+        ) as unknown as Memory[];
     }
     return this.db
-      .prepare('SELECT * FROM memories ORDER BY createdAt DESC')
-      .all() as unknown as Memory[];
+      .prepare(
+        `SELECT * FROM memories WHERE 1=1${ownerClause} ORDER BY createdAt DESC`,
+      )
+      .all(...(ownerId ? [ownerId] : [])) as unknown as Memory[];
   }
   saveMemory(
     text: string,
     id: string = randomUUID(),
     category?: string,
+    ownerId: string = this.bootstrapOwnerId,
   ): Memory {
     this.db
       .prepare(
-        'INSERT INTO memories (id, text, category, createdAt) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET text=excluded.text, category=COALESCE(excluded.category, memories.category)',
+        'INSERT INTO memories (id, text, category, createdAt, ownerId) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET text=excluded.text, category=COALESCE(excluded.category, memories.category)',
       )
-      .run(id, text, category || 'general', Date.now());
+      .run(id, text, category || 'general', Date.now(), ownerId);
     return this.db
       .prepare('SELECT * FROM memories WHERE id=?')
       .get(id) as unknown as Memory;
@@ -386,20 +435,37 @@ export class Store {
       .all(id) as Array<{ toId: string; relation: string }>;
   }
   /** Graph view: category segments with their memories and all edges. */
-  memoryGraph(): {
+  memoryGraph(ownerId?: string): {
     segments: Array<{ category: string; count: number; memoryIds: string[] }>;
     edges: Array<{ fromId: string; toId: string; relation: string }>;
     total: number;
   } {
-    const memories = this.memories();
+    // Oldest-first: segments appear in the order memories were created,
+    // independent of same-millisecond timestamp ties.
+    const memories = (
+      ownerId
+        ? this.db
+            .prepare(
+              'SELECT * FROM memories WHERE ownerId=? ORDER BY createdAt ASC, rowid ASC',
+            )
+            .all(ownerId)
+        : this.db
+            .prepare(
+              'SELECT * FROM memories ORDER BY createdAt ASC, rowid ASC',
+            )
+            .all()
+    ) as unknown as Memory[];
     const byCategory = new Map<string, string[]>();
     for (const memory of memories) {
       const category = memory.category || 'general';
       byCategory.set(category, [...(byCategory.get(category) ?? []), memory.id]);
     }
-    const edges = this.db
-      .prepare('SELECT fromId, toId, relation FROM memory_links ORDER BY createdAt')
-      .all() as Array<{ fromId: string; toId: string; relation: string }>;
+    const visible = new Set(memories.map((memory) => memory.id));
+    const edges = (
+      this.db
+        .prepare('SELECT fromId, toId, relation FROM memory_links ORDER BY createdAt')
+        .all() as Array<{ fromId: string; toId: string; relation: string }>
+    ).filter((edge) => visible.has(edge.fromId) && visible.has(edge.toId));
     return {
       segments: [...byCategory.entries()]
         .map(([category, memoryIds]) => ({
@@ -413,10 +479,10 @@ export class Store {
     };
   }
   /** Fuzzy search over global memories, strongest matches first. */
-  searchMemories(query: string, limit = 10) {
+  searchMemories(query: string, limit = 10, ownerId?: string) {
     return fuzzyRank(
       query,
-      this.memories().map((memory) => ({
+      this.memories(undefined, ownerId).map((memory) => ({
         id: memory.id,
         text: memory.text,
         category: memory.category ?? null,

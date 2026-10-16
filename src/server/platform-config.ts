@@ -1,5 +1,6 @@
 import type { WebConfig } from './parallel.js';
 import type { SetupStatus } from '../shared/types.js';
+import type { AuthStore } from './auth.js';
 export interface PlatformConfig extends WebConfig {
   intelligenceKey?: string;
   intelligenceApiUrl?: string;
@@ -15,6 +16,8 @@ export interface PlatformConfig extends WebConfig {
   browserSecret?: string;
   voiceKey?: string;
   voiceModel?: string;
+  /** Realtime provider override ('gemini' | 'openai'); inferred from VOICE_MODEL when unset. */
+  voiceProvider?: string;
   voiceName: string;
   slackChannel?: string;
   slackTeam?: string;
@@ -22,6 +25,8 @@ export interface PlatformConfig extends WebConfig {
   slackDotId?: string;
   runtimeUrl: string;
   ownerToken?: string;
+  /** Accounts, so the runtime can identify the signed-in user per request. */
+  auth?: AuthStore;
 }
 export function setupStatus(
   config: PlatformConfig,

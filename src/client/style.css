@@ -1416,6 +1416,109 @@ h3 {
   flex-direction: column;
   gap: 12px;
 }
+.unlock-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #1c1c1e;
+  cursor: pointer;
+  user-select: none;
+}
+.unlock-remember input {
+  accent-color: #2f6f62;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  background: #f0efe9;
+  border-radius: 999px;
+  padding: 4px;
+}
+.auth-tabs button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 7px 0;
+  font-size: 13px;
+  color: #5c5c61;
+  cursor: pointer;
+}
+.auth-tabs button.active {
+  background: #fff;
+  color: #1c1c1e;
+  font-weight: 600;
+  box-shadow: 0 1px 4px #00000014;
+}
+.unlock form input[type='text'],
+.unlock form input[type='email'],
+.unlock form input[type='password'] {
+  border: 1px solid #e3e0d8;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  background: #fff;
+}
+.unlock-token-details {
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  color: #6e6e73;
+  margin-top: 14px;
+}
+.unlock-token-details summary {
+  cursor: pointer;
+  text-align: center;
+  color: #999dab;
+}
+.unlock-token-details form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.unlock-token-details input {
+  flex: 1;
+  border: 1px solid #e3e0d8;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.unlock-token-details button {
+  border: 1px solid #e3e0d8;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.nav-user {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px 2px;
+  min-width: 0;
+}
+.nav-user-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-user-role {
+  font-size: 10px;
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-theme='dark'] .unlock-remember {
+  color: #e7f5ef;
+}
 .unlock .error {
   color: #bc8076;
 }
@@ -4381,6 +4484,85 @@ h3 {
   padding: 10px;
   border-radius: 50%;
 }
+.call-heading-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.call-voice-picker {
+  position: relative;
+}
+.call-voice-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff12;
+  color: #d0e7e0;
+  border: 1px solid #ffffff20;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.call-voice-button:hover {
+  background: #ffffff20;
+}
+.call-voice-name {
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.call-voice-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 80;
+  min-width: 190px;
+  max-height: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: #14332e;
+  border: 1px solid #ffffff26;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px #0a1f1c66;
+}
+.call-voice-menu-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9cc5b8;
+  padding: 2px 8px 6px;
+}
+.call-voice-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: transparent;
+  border: 0;
+  color: #e7f5ef;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+.call-voice-menu button:hover {
+  background: #ffffff14;
+}
+.call-voice-menu button.current {
+  color: #abf1d5;
+}
+.call-voice-menu-note {
+  font-size: 11px;
+  color: #9cc5b8;
+  padding: 6px 8px 2px;
+  border-top: 1px solid #ffffff1a;
+  margin-top: 4px;
+}
 .call-persona {
   display: flex;
   align-items: center;
@@ -4489,6 +4671,23 @@ h3 {
 }
 .call-view.minimized .call-persona {
   margin-top: 10px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.call-view.minimized .call-persona:active {
+  cursor: grabbing;
+}
+.call-view.minimized .call-persona:focus-visible {
+  outline: 2px solid #9fd8c5;
+  outline-offset: 4px;
+  border-radius: 14px;
+}
+.call-view.minimized .call-persona .mascot,
+.call-view.minimized .call-persona h2,
+.call-view.minimized .call-persona .call-timer {
+  pointer-events: none;
 }
 .call-view.minimized .call-persona .mascot {
   width: 52px;
@@ -4885,10 +5084,12 @@ copilotkit-web-inspector,
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  /* Wrap instead of horizontal scroll: a scroll container clips the
+     upward-opening popover menus (folder, model, effort, audio), so
+     clicking those pills appeared to do nothing. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  overflow: visible;
   max-width: 100%;
 }
 
@@ -5686,6 +5887,20 @@ copilotkit-web-inspector,
   margin-bottom: 8px;
   animation: fadeIn 0.2s ease-out;
 }
+.compact-toast-banner .compact-toast-undo {
+  border: 1px solid #1c1c1e;
+  background: transparent;
+  color: #1c1c1e;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.compact-toast-banner .compact-toast-undo:hover {
+  background: #1c1c1e;
+  color: #f4f3ef;
+}
 
 /* Slash Commands Menu (Pure White Theme matching App UI, Zero Cream) */
 .slash-commands-menu {
@@ -6201,6 +6416,35 @@ copilotkit-web-inspector,
 }
 
 /* Attachments */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: #1c1c1eb8;
+  backdrop-filter: blur(3px);
+}
+.drop-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 34px 46px;
+  border: 2px dashed #1c1c1e55;
+  border-radius: 20px;
+  background: #fff;
+  color: #1c1c1e;
+  font-size: 13px;
+  box-shadow: 0 24px 80px #153e3b40;
+  pointer-events: none;
+}
+.drop-overlay-card strong {
+  font-size: 16px;
+}
+.drop-overlay-card span {
+  color: #6e6e73;
+}
 .attach-preview-row {
   display: flex;
   flex-wrap: wrap;

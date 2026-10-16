@@ -2,6 +2,8 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { getOpenCodeStatus, runOpenCode } from './opencode.js';
+import { getCodexStatus } from './codex.js';
+import { setLiveSnapshot } from './local-runner.js';
 import { pageRoutes } from './page-routes.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -12,6 +14,7 @@ import {
   validateLearningSettings,
 } from '../shared/learning.js';
 import type { Settings } from '../shared/types.js';
+import type { AuthUser } from './auth.js';
 const dotSchema = z
   .object({
     name: z.string().trim().min(1).max(40),
@@ -36,11 +39,27 @@ const dotSchema = z
 export function workspaceRoutes(platform: Platform, voice: VoiceService) {
   const app = new Hono();
   app.route('/', pageRoutes(platform));
+  // Per-user scoping: the signed-in user's id when accounts are active;
+  // undefined in open bootstrap/legacy mode, where the store's default
+  // owner applies. Every thread-scoped route resolves ownership first.
+  const actor = (c: { get: (key: string) => unknown }): AuthUser | undefined =>
+    c.get('user') as AuthUser | undefined;
+  const owned = (c: { get: (key: string) => unknown }, threadId: string) =>
+    platform.workspace.requireThread(threadId, undefined, actor(c)?.id);
+  /** A voice call is reachable only by the owner of its conversation. */
+  const ownedCall = (c: { get: (key: string) => unknown }, callId: string) => {
+    const call = platform.workspace.call(callId);
+    platform.workspace.requireThread(
+      call.threadId,
+      undefined,
+      actor(c)?.id,
+    );
+  };
   app.get('/workspace', (c) =>
     c.json({
       spaces: platform.workspace.spaces(),
       dots: platform.workspace.dots(),
-      conversations: platform.workspace.conversations(),
+      conversations: platform.workspace.conversations(actor(c)?.id),
       setup: platform.setup(),
       calls: platform.workspace.calls(),
     }),
@@ -129,8 +148,51 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       /* opencode status unavailable — continue without free models */
     }
 
+    // Custom/local endpoint from Settings (e.g. Ollama, LM Studio):
+    // merge its models best-effort so they are selectable everywhere.
+    let customModelIds: string[] = [];
+    try {
+      const settings = platform.store.settings();
+      const customBase = (settings.customBaseUrl || '').trim().replace(/\/+$/, '');
+      if (customBase) {
+        const headers: Record<string, string> = {};
+        if (settings.customApiKey?.trim())
+          headers['Authorization'] = `Bearer ${settings.customApiKey.trim()}`;
+        const res = await fetch(`${customBase}/models`, {
+          headers,
+          signal: AbortSignal.timeout(4000),
+        });
+        if (res.ok) {
+          const body = (await res.json()) as { data?: Array<{ id?: unknown }> };
+          if (Array.isArray(body.data)) {
+            customModelIds = body.data
+              .map((m) => m?.id)
+              .filter(
+                (id): id is string =>
+                  typeof id === 'string' && id.trim().length > 0,
+              )
+              .map((id) => id.trim());
+          }
+        }
+      }
+    } catch {
+      /* local provider offline — default and cloud lists still served */
+    }
+
+    let codex = null;
+    try {
+      codex = await getCodexStatus();
+    } catch {
+      /* codex status unavailable — models list still served */
+    }
+
     const models = Array.from(
-      new Set([...cachedModels, ...opencodeFreeModelIds, ...fallbackList]),
+      new Set([
+        ...cachedModels,
+        ...opencodeFreeModelIds,
+        ...customModelIds,
+        ...fallbackList,
+      ]),
     );
 
     return c.json({
@@ -146,11 +208,30 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         'max',
       ],
       opencode,
+      codex,
+      customProvider: (() => {
+        try {
+          const settings = platform.store.settings();
+          return settings.customBaseUrl?.trim()
+            ? {
+                baseUrl: settings.customBaseUrl.trim(),
+                configured: true,
+                hasKey: Boolean(settings.customApiKey?.trim()),
+              }
+            : { baseUrl: null, configured: false, hasKey: false };
+        } catch {
+          return { baseUrl: null, configured: false, hasKey: false };
+        }
+      })(),
     });
   });
 
   app.get('/opencode/status', async (c) => {
     return c.json(await getOpenCodeStatus(true));
+  });
+
+  app.get('/codex/status', async (c) => {
+    return c.json(await getCodexStatus(true));
   });
 
   app.post('/opencode/run', async (c) => {
@@ -172,8 +253,10 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
 
   app.get('/workspace/directory', (c) => {
     const settings = platform.store.settings();
-    const dir = settings.codingDirectory || process.cwd();
-    const exists = existsSync(dir);
+    // Blank by default: no folder is connected until the owner picks one.
+    // Coding tools fall back to process.cwd() when this is empty.
+    const dir = settings.codingDirectory || '';
+    const exists = dir ? existsSync(dir) : false;
     const isGit = exists && existsSync(join(dir, '.git'));
     let permissions = { bash: 'auto', edits: 'auto' };
     try {
@@ -195,7 +278,9 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
   app.post('/workspace/directory', async (c) => {
     const data = z
       .object({
-        directory: z.string().min(1).max(1000),
+        // Empty string or null disconnects the folder (pure chat, no
+        // local file/shell tools). A non-empty value must exist on disk.
+        directory: z.string().max(1000).nullable().optional(),
         permissions: z
           .object({
             bash: z.enum(['auto', 'ask', 'deny']).optional(),
@@ -207,13 +292,25 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     if (!data.success) {
       return c.json({ error: 'Valid directory path is required.' }, 400);
     }
-    if (!existsSync(data.data.directory)) {
+    const requested = (data.data.directory ?? '').trim();
+    if (!requested) {
+      const updated = platform.store.updateSettings({ codingDirectory: null });
+      let perms = { bash: 'auto', edits: 'auto' };
+      try {
+        if (updated.codingPermissions)
+          perms = JSON.parse(updated.codingPermissions);
+      } catch {
+        /* invalid permissions JSON — keep defaults */
+      }
+      return c.json({ directory: '', exists: false, isGit: false, permissions: perms });
+    }
+    if (!existsSync(requested)) {
       return c.json(
-        { error: `Directory does not exist on disk: ${data.data.directory}` },
+        { error: `Directory does not exist on disk: ${requested}` },
         404,
       );
     }
-    const patch: Partial<Settings> = { codingDirectory: data.data.directory };
+    const patch: Partial<Settings> = { codingDirectory: requested };
     if (data.data.permissions) {
       patch.codingPermissions = JSON.stringify(data.data.permissions);
     }
@@ -227,6 +324,10 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     }
     return c.json({
       directory: updated.codingDirectory,
+      exists: true,
+      isGit:
+        !!updated.codingDirectory &&
+        existsSync(join(updated.codingDirectory, '.git')),
       permissions: perms,
     });
   });
@@ -269,11 +370,13 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
 
   app.get('/conversations/:threadId/session-memories', (c) => {
     const threadId = c.req.param('threadId');
+    owned(c, threadId);
     return c.json(platform.workspace.sessionMemories(threadId));
   });
 
   app.post('/conversations/:threadId/session-memories', async (c) => {
     const threadId = c.req.param('threadId');
+    owned(c, threadId);
     const data = z
       .object({
         text: z.string().trim().min(1).max(2000),
@@ -300,6 +403,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
 
   app.delete('/conversations/:threadId/session-memories', (c) => {
     const threadId = c.req.param('threadId');
+    owned(c, threadId);
     const count = platform.workspace.clearSessionMemories(threadId);
     return c.json({ cleared: count });
   });
@@ -308,6 +412,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
   // Entries are like files — small summary in context, full content on demand.
   app.get('/conversations/:threadId/task-memory', (c) => {
     const threadId = c.req.param('threadId');
+    owned(c, threadId);
     // Summaries only by default; full content needs ?full=1 or a single read.
     const entries = platform.workspace.taskMemories(threadId);
     if (c.req.query('full') !== '1') {
@@ -329,6 +434,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
 
   app.post('/conversations/:threadId/task-memory', async (c) => {
     const threadId = c.req.param('threadId');
+    owned(c, threadId);
     const data = z
       .object({
         name: z.string().trim().min(1).max(200),
@@ -372,6 +478,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
 
   app.delete('/conversations/:threadId/task-memory', (c) => {
     const threadId = c.req.param('threadId');
+    owned(c, threadId);
     const count = platform.workspace.clearTaskMemory(threadId);
     return c.json({ cleared: count });
   });
@@ -498,14 +605,18 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         503,
       );
     return c.json(
-      await platform.createConversation(data.data.dotId, data.data.title),
+      await platform.createConversation(
+        data.data.dotId,
+        data.data.title,
+        actor(c)?.id,
+      ),
       201,
     );
   });
   app.delete('/conversations/:id', (c) => {
     const id = c.req.param('id');
     try {
-      platform.workspace.deleteThread(id);
+      platform.workspace.deleteThread(id, actor(c)?.id);
       return c.json({ success: true, id });
     } catch (e) {
       return c.json(
@@ -529,7 +640,11 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         400,
       );
     try {
-      platform.workspace.updateThread(id, { title: data.data.title });
+      platform.workspace.updateThread(
+        id,
+        { title: data.data.title },
+        actor(c)?.id,
+      );
       return c.json({ success: true, id, title: data.data.title });
     } catch (e) {
       return c.json(
@@ -558,6 +673,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         c.req.param('id'),
         data.data.uptoMessageId,
         data.data.title,
+        actor(c)?.id,
       );
       return c.json(forked, 201);
     } catch (e) {
@@ -571,8 +687,10 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       );
     }
   });
-  // Edit a message in place; turns after it are dropped (edit-and-resend).
+  // Edit a message; the target + everything after is dropped (edit-and-
+  // resend) and the removed tail is returned so the client can offer undo.
   app.post('/conversations/:id/edit', async (c) => {
+    owned(c, c.req.param('id'));
     const data = z
       .object({
         messageId: z.string().trim().min(1).max(100),
@@ -591,7 +709,19 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         data.data.messageId,
         data.data.content,
       );
-      return c.json(result);
+      const lastRun = platform.workspace
+        .threadRuns(c.req.param('id'))
+        .at(-1);
+      if (lastRun)
+        setLiveSnapshot(
+          c.req.param('id'),
+          JSON.parse(lastRun.messages) as unknown[],
+        );
+      return c.json({
+        edited: result.edited,
+        removed: result.removed.length,
+        tail: result.removed,
+      });
     } catch (e) {
       return c.json(
         {
@@ -603,8 +733,10 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       );
     }
   });
-  // Revert in place: keep history up to a message, drop the rest.
+  // Revert in place: keep history up to a message, drop the rest. The
+  // removed tail is returned for the undo affordance.
   app.post('/conversations/:id/revert', async (c) => {
+    owned(c, c.req.param('id'));
     const data = z
       .object({ messageId: z.string().trim().min(1).max(100) })
       .strict()
@@ -612,17 +744,74 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     if (!data.success)
       return c.json({ error: 'A messageId is required.' }, 400);
     try {
-      const removed = platform.workspace.revertThreadToMessage(
+      const tail = platform.workspace.revertThreadToMessage(
         c.req.param('id'),
         data.data.messageId,
       );
-      return c.json({ removed });
+      const lastRun = platform.workspace
+        .threadRuns(c.req.param('id'))
+        .at(-1);
+      if (lastRun)
+        setLiveSnapshot(
+          c.req.param('id'),
+          JSON.parse(lastRun.messages) as unknown[],
+        );
+      return c.json({ removed: tail.length, tail });
     } catch (e) {
       return c.json(
         {
           error:
             (e instanceof Error && e.message) ||
             'Could not revert conversation.',
+        },
+        404,
+      );
+    }
+  });
+  // Undo for revert/edit: appends the removed tail back after the current
+  // state as a fresh snapshot row.
+  app.post('/conversations/:id/restore', async (c) => {
+    owned(c, c.req.param('id'));
+    const messageSchema = z.object({
+      id: z.string().trim().min(1).max(100),
+      role: z.enum(['user', 'assistant', 'system', 'developer', 'tool']),
+      content: z.string().max(200_000),
+    });
+    const data = z
+      .object({ tail: z.array(messageSchema).min(1).max(400) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!data.success)
+      return c.json(
+        { error: 'Provide the removed messages to restore (1-400).' },
+        400,
+      );
+    const totalBytes = data.data.tail.reduce(
+      (sum, m) => sum + m.content.length,
+      0,
+    );
+    if (totalBytes > 500_000)
+      return c.json({ error: 'The removed part is too large to restore.' }, 413);
+    try {
+      const result = platform.workspace.restoreThreadMessages(
+        c.req.param('id'),
+        data.data.tail,
+      );
+      const lastRun = platform.workspace
+        .threadRuns(c.req.param('id'))
+        .at(-1);
+      if (lastRun)
+        setLiveSnapshot(
+          c.req.param('id'),
+          JSON.parse(lastRun.messages) as unknown[],
+        );
+      return c.json(result);
+    } catch (e) {
+      return c.json(
+        {
+          error:
+            (e instanceof Error && e.message) ||
+            'Could not restore the messages.',
         },
         404,
       );
@@ -645,6 +834,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         c.req.param('threadId'),
         data.data.question,
         AbortSignal.timeout(180_000),
+        actor(c)?.id,
       );
       return c.json({ reply });
     } catch (e) {
@@ -659,15 +849,16 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
   });
   app.delete('/conversations', (c) => {
     const dotId = c.req.query('dotId');
-    const threads = platform.workspace.conversations();
+    const threads = platform.workspace.conversations(actor(c)?.id);
     const toDelete = dotId ? threads.filter((t) => t.dotId === dotId) : threads;
     for (const thread of toDelete) {
-      platform.workspace.deleteThread(thread.id);
+      platform.workspace.deleteThread(thread.id, actor(c)?.id);
     }
     return c.json({ success: true, count: toDelete.length });
   });
   app.post('/conversations/:id/compact', (c) => {
     const id = c.req.param('id');
+    owned(c, id);
     try {
       const result = platform.workspace.compactThreadMessages(id);
       return c.json({ success: true, ...result });
@@ -684,6 +875,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
   });
   app.post('/conversations/:id/clear', (c) => {
     const id = c.req.param('id');
+    owned(c, id);
     try {
       platform.workspace.clearThreadMessages(id);
       return c.json({ success: true, id });
@@ -697,11 +889,13 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       );
     }
   });
-  app.get('/conversations/:id/capture', (c) =>
-    c.json(platform.workspace.capture(c.req.param('id'))),
-  );
+  app.get('/conversations/:id/capture', (c) => {
+    owned(c, c.req.param('id'));
+    return c.json(platform.workspace.capture(c.req.param('id')));
+  });
   app.get('/conversations/:id/memories', (c) => {
     const threadId = c.req.param('id');
+    owned(c, threadId);
     const category = c.req.query('category');
     return c.json(
       platform.workspace.sessionMemories(threadId, category || undefined),
@@ -709,6 +903,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
   });
   app.post('/conversations/:id/memories', async (c) => {
     const threadId = c.req.param('id');
+    owned(c, threadId);
     const data = z
       .object({
         id: z.string().optional(),
@@ -749,7 +944,12 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         400,
       );
     return c.json(
-      await voice.begin(data.data.threadId, data.data.sdp, c.req.raw.signal),
+      await voice.begin(
+        data.data.threadId,
+        data.data.sdp,
+        c.req.raw.signal,
+        actor(c)?.id,
+      ),
       201,
     );
   });
@@ -889,13 +1089,16 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
 
     return c.json({ text: transcribedText });
   });
-  app.get('/voice/calls/:id', (c) =>
-    c.json(platform.workspace.call(c.req.param('id'))),
-  );
-  app.post('/voice/calls/:id/active', (c) =>
-    c.json(voice.activate(c.req.param('id'))),
-  );
+  app.get('/voice/calls/:id', (c) => {
+    ownedCall(c, c.req.param('id'));
+    return c.json(platform.workspace.call(c.req.param('id')));
+  });
+  app.post('/voice/calls/:id/active', (c) => {
+    ownedCall(c, c.req.param('id'));
+    return c.json(voice.activate(c.req.param('id')));
+  });
   app.post('/voice/calls/:id/compute', async (c) => {
+    ownedCall(c, c.req.param('id'));
     const data = z
       .object({
         toolCallId: z.string().min(1).max(200),
@@ -918,6 +1121,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     });
   });
   app.post('/voice/calls/:id/end', async (c) => {
+    ownedCall(c, c.req.param('id'));
     const data = z
       .object({
         transcript: z.string().max(20000),
@@ -933,9 +1137,14 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     platform.workspace.anchorCall(c.req.param('id'), data.data.anchorMessageId);
     return c.json(await voice.end(c.req.param('id'), data.data.transcript));
   });
-  app.all('/copilotkit/*', (c) => platform.handle(c.req.raw));
+  app.all('/copilotkit/*', (c) => platform.handle(c.req.raw, actor(c)?.id));
   app.onError((error, c) => {
     const text = error.message;
+    // Ownership misses read as plain 404s: another user's id must not be
+    // distinguishable from a nonexistent one, and a permission answer is
+    // not a service failure.
+    if (/does not belong/.test(text))
+      return c.json({ error: 'Conversation not found.' }, 404);
     const known =
       /^(Setup|Voice setup|Dot |Space |Specialist |Conversation |Call |This call|End the current|Voice provider|An audio|Intelligence could not)/.test(
         text,

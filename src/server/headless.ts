@@ -33,7 +33,17 @@ export async function runThreadTurn(
   const response = await fetch(`${runtimeUrl}/info`, { headers, signal });
   if (!response.ok)
     throw new Error(`Intelligence runtime returned HTTP ${response.status}.`);
-  const info = runtimeInfoSchema.parse(await response.json());
+  const raw = await response.json().catch(() => null);
+  const parsed = runtimeInfoSchema.safeParse(raw);
+  if (!parsed.success) {
+    // Cloud mode answered runtime discovery without the Intelligence
+    // shape — server-side turns (voice compute, call receipts, scheduled
+    // tasks) have no runtime to run on.
+    throw new Error(
+      'Server-side turns need the cloud Intelligence runtime, but runtime discovery did not return one. Set a valid INTELLIGENCE_API_KEY so voice actions, call receipts, and scheduled turns can run.',
+    );
+  }
+  const info = parsed.data;
   if (!Object.hasOwn(info.agents, dotId))
     throw new Error('The selected Dot is unavailable in the runtime.');
   // Core's runtime discovery is browser-only. Use the SDK's Node-compatible

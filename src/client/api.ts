@@ -1,8 +1,27 @@
-let token = sessionStorage.getItem('opendots-token') ?? '';
-export function setToken(value: string) {
+const TOKEN_KEY = 'opendots-token';
+function readStored(): string {
+  try {
+    // Session-scoped unlock wins over a remembered one; both may exist if
+    // the owner re-locked and chose not to remember this time.
+    return (
+      sessionStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(TOKEN_KEY) ?? ''
+    );
+  } catch {
+    /* storage unavailable (private mode) — stay locked until set */
+    return '';
+  }
+}
+let token = readStored();
+export function setToken(value: string, remember = false) {
   token = value;
-  if (value) sessionStorage.setItem('opendots-token', value);
-  else sessionStorage.removeItem('opendots-token');
+  try {
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    if (value)
+      (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, value);
+  } catch {
+    /* storage unavailable — the token still lives in memory for this tab */
+  }
 }
 export class ApiError extends Error {
   constructor(

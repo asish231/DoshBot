@@ -24,6 +24,9 @@ import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { TelegramChannel } from './telegram-channel.js';
 import { attachGeminiLiveHandler } from './gemini-live.js';
+import { AuthRateLimiter } from './auth-rate-limit.js';
+import { WsTicketStore } from './ws-tickets.js';
+import { AuthStore } from './auth.js';
 import type { PlatformConfig } from './platform-config.js';
 const host = process.env.HOST ?? '127.0.0.1';
 const port = Number(process.env.PORT ?? 4310);
@@ -36,14 +39,16 @@ if (
     'External binding requires an OWNER_TOKEN of at least 24 characters.',
   );
 const database = process.env.DATABASE_PATH ?? 'data/opendots.sqlite';
+// Stable identity that owns pre-existing data; the first signed-up account
+// adopts it so old conversations and memories carry over.
+const ownerId = process.env.OWNER_ID ?? 'opendots-owner';
 const store = new Store(database, {
   skillsDir: process.env.SKILLS_DIR ?? 'data/skills',
   uploadsDir: process.env.UPLOADS_DIR ?? 'data/uploads',
+  ownerId,
 });
-const workspace = new WorkspaceStore(
-  database,
-  process.env.OWNER_ID ?? 'opendots-owner',
-);
+const workspace = new WorkspaceStore(database, ownerId);
+const auth = new AuthStore(database, ownerId);
 const config: PlatformConfig = {
   intelligenceKey: process.env.INTELLIGENCE_API_KEY,
   intelligenceApiUrl: process.env.INTELLIGENCE_API_URL || undefined,
@@ -61,6 +66,7 @@ const config: PlatformConfig = {
   computerNamespace: process.env.COMPUTER_NAMESPACE,
   voiceKey: process.env.VOICE_API_KEY,
   voiceModel: process.env.VOICE_MODEL,
+  voiceProvider: process.env.VOICE_PROVIDER || undefined,
   voiceName: process.env.VOICE_NAME ?? 'marin',
   slackChannel: process.env.SLACK_CHANNEL_NAME,
   slackTeam: process.env.SLACK_TEAM_ID,
@@ -72,7 +78,7 @@ const config: PlatformConfig = {
   runtimeUrl: `http://${host === '::1' ? '[::1]' : '127.0.0.1'}:${port}/api/copilotkit`,
   ownerToken,
 };
-const platform = new Platform(store, workspace, config);
+const platform = new Platform(store, workspace, { ...config, auth });
 const researchConfig = {
   mode: 'live' as const,
   apiKey: config.apiKey,
@@ -106,6 +112,8 @@ const origin =
   (process.env.NODE_ENV === 'development'
     ? 'http://127.0.0.1:5173'
     : undefined);
+const authLimiter = new AuthRateLimiter();
+const wsTickets = new WsTicketStore();
 const app: App = createApp({
   store,
   runner,
@@ -114,6 +122,9 @@ const app: App = createApp({
   origin,
   platform,
   connectOrigins: [wsOrigin],
+  authLimiter,
+  wsTickets,
+  auth,
 });
 app.get('/api/*', (c) => c.json({ error: 'Not found.' }, 404));
 app.use('/*', serveStatic({ root: './dist/client' }));
@@ -139,7 +150,12 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
       ),
     );
 });
-attachGeminiLiveHandler(server, platform, { ownerToken, origin });
+attachGeminiLiveHandler(server, platform, {
+  ownerToken,
+  origin,
+  wsTickets,
+  auth,
+});
 const shutdown = createShutdown({
   stopRunner: () => {
     runner.stop();

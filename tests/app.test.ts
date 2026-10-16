@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/server/app.js';
 import { Store } from '../src/server/store.js';
 import { Runner } from '../src/server/runner.js';
+import { AuthRateLimiter } from '../src/server/auth-rate-limit.js';
+import { WsTicketStore } from '../src/server/ws-tickets.js';
 import type { Config } from '../src/server/research.js';
 const stores: Store[] = [];
 const config: Config = { mode: 'sample', baseUrl: 'https://api.openai.com/v1' };
@@ -32,6 +34,58 @@ describe('API boundaries', () => {
         })
       ).status,
     ).toBe(200);
+  });
+  it('rate-limits repeated failed token attempts and advertises Retry-After', async () => {
+    const limiter = new AuthRateLimiter(3, 60_000, 60_000);
+    const store = new Store(':memory:');
+    stores.push(store);
+    const app = createApp({
+      store,
+      runner: new Runner(store, config),
+      config,
+      ownerToken: 'private-token',
+      authLimiter: limiter,
+    });
+    // Failures up to the threshold are ordinary 401s.
+    for (let i = 0; i < 3; i++)
+      expect(
+        (await app.request('/api/state', { headers: { Authorization: 'Bearer wrong' } }))
+          .status,
+      ).toBe(401);
+    // The next attempt is blocked before the token is even compared.
+    const blocked = await app.request('/api/state', {
+      headers: { Authorization: 'Bearer private-token' },
+    });
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+  });
+  it('issues single-use voice WebSocket tickets only to the owner', async () => {
+    const wsTickets = new WsTicketStore();
+    const store = new Store(':memory:');
+    stores.push(store);
+    const app = createApp({
+      store,
+      runner: new Runner(store, config),
+      config,
+      ownerToken: 'private-token',
+      wsTickets,
+    });
+    // Unauthenticated requests cannot mint tickets.
+    expect((await app.request('/api/voice/ws-ticket', json({}))).status).toBe(
+      401,
+    );
+    const res = await app.request('/api/voice/ws-ticket', {
+      ...json({}),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer private-token',
+      },
+    });
+    expect(res.status).toBe(200);
+    const { ticket } = (await res.json()) as { ticket: string };
+    expect(ticket).toHaveLength(64);
+    expect(wsTickets.consume(ticket)).not.toBeNull();
+    expect(wsTickets.consume(ticket)).toBeNull();
   });
   it('blocks browser cross-origin requests and form posts', async () => {
     const { app } = fixture();

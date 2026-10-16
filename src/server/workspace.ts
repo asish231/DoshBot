@@ -275,20 +275,25 @@ export class WorkspaceStore {
     }
     return this.dot(id)!;
   }
-  conversations(): Conversation[] {
+  conversations(ownerId: string = this.ownerId): Conversation[] {
     return this.db
       .prepare(
         'SELECT * FROM thread_bindings WHERE ownerId=? ORDER BY createdAt DESC',
       )
-      .all(this.ownerId) as unknown as Conversation[];
+      .all(ownerId) as unknown as Conversation[];
   }
-  bindThread(id: string, dotId: string, title: string): Conversation {
+  bindThread(
+    id: string,
+    dotId: string,
+    title: string,
+    ownerId: string = this.ownerId,
+  ): Conversation {
     const dot = this.dot(dotId);
     if (!dot) throw new Error('Dot not found.');
     const value: Conversation = {
       id,
       dotId,
-      ownerId: this.ownerId,
+      ownerId,
       title,
       createdAt: Date.now(),
       learningContainerId: dot.learningContainerId ?? null,
@@ -300,30 +305,42 @@ export class WorkspaceStore {
       .run(
         id,
         dotId,
-        this.ownerId,
+        ownerId,
         title,
         value.createdAt,
         value.learningContainerId ?? null,
       );
     return value;
   }
-  requireThread(id: string, dotId?: string): Conversation {
-    const thread = this.conversations().find((thread) => thread.id === id);
-    if (!thread || (dotId && thread.dotId !== dotId))
+  /**
+   * Resolves a conversation. When `ownerId` is given (every HTTP-facing
+   * path passes the signed-in user) the thread must belong to that owner —
+   * another user's thread id reads as missing. Without `ownerId` the
+   * lookup is server-internal (scheduled tasks, channels) and unrestricted.
+   */
+  requireThread(id: string, dotId?: string, ownerId?: string): Conversation {
+    const thread = this.db
+      .prepare('SELECT * FROM thread_bindings WHERE id=?')
+      .get(id) as unknown as Conversation | undefined;
+    if (
+      !thread ||
+      (dotId && thread.dotId !== dotId) ||
+      (ownerId && thread.ownerId !== ownerId)
+    )
       throw new Error('Conversation does not belong to this Dot and owner.');
     return thread;
   }
-  updateThread(id: string, updates: { title?: string }): void {
+  updateThread(id: string, updates: { title?: string }, ownerId?: string): void {
     if (updates.title) {
       this.db
         .prepare('UPDATE thread_bindings SET title=? WHERE id=? AND ownerId=?')
-        .run(updates.title, id, this.ownerId);
+        .run(updates.title, id, ownerId ?? this.ownerId);
     }
   }
-  deleteThread(id: string): void {
+  deleteThread(id: string, ownerId?: string): void {
     this.db
       .prepare('DELETE FROM thread_bindings WHERE id=? AND ownerId=?')
-      .run(id, this.ownerId);
+      .run(id, ownerId ?? this.ownerId);
     this.db.prepare('DELETE FROM local_thread_runs WHERE threadId=?').run(id);
     this.db.prepare('DELETE FROM calls WHERE threadId=?').run(id);
     this.db.prepare('DELETE FROM captures WHERE threadId=?').run(id);
@@ -523,8 +540,9 @@ export class WorkspaceStore {
     threadId: string,
     uptoMessageId?: string,
     title?: string,
+    ownerId: string = this.ownerId,
   ): Conversation {
-    const source = this.requireThread(threadId);
+    const source = this.requireThread(threadId, undefined, ownerId);
     const newId = randomUUID();
     this.db
       .prepare(
@@ -533,7 +551,7 @@ export class WorkspaceStore {
       .run(
         newId,
         source.dotId,
-        this.ownerId,
+        ownerId,
         title ?? `Fork of ${source.title}`.slice(0, 120),
         Date.now(),
         source.learningContainerId ?? null,
@@ -603,78 +621,145 @@ export class WorkspaceStore {
     return this.requireThread(newId);
   }
   /**
-   * Edits one message in place and drops every later turn — standard
-   * edit-and-resend semantics: history after the edit point is discarded
-   * so the next reply follows from the corrected message.
+   * Edits a message using edit-and-resend semantics: the original message
+   * and everything after it are dropped from the thread, and the client
+   * re-sends the corrected content as a fresh message. Rows are full
+   * conversation snapshots, so EVERY row containing the target is
+   * truncated — otherwise the tail would resurrect from earlier snapshots
+   * on the next server restart. Returns the removed tail for undo.
    */
   editThreadMessage(
     threadId: string,
     messageId: string,
-    content: string,
-  ): { edited: boolean; truncatedRuns: number } {
+    _content: string,
+  ): {
+    edited: boolean;
+    removed: Array<{ id: string; role: string; content: string }>;
+  } {
     this.requireThread(threadId);
+    // Validate BEFORE mutating: the target must exist and be a text message.
     const runs = this.threadRuns(threadId);
-    for (let i = 0; i < runs.length; i++) {
-      const run = runs[i]!;
+    let targetIsText = false;
+    for (const run of runs) {
       try {
         const parsed = JSON.parse(run.messages) as Array<{
           id?: string;
           content?: string | Array<unknown>;
         }>;
+        const target = parsed.find((m) => m.id === messageId);
+        if (target) {
+          if (typeof target.content !== 'string')
+            throw new Error('Only text messages can be edited.');
+          targetIsText = true;
+          break;
+        }
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.includes('text messages')
+        )
+          throw error;
+        /* malformed row — keep looking */
+      }
+    }
+    if (!targetIsText) throw new Error('Message not found in this conversation.');
+    // Edit-and-resend: drop the target + tail everywhere; the client re-sends
+    // the corrected content as a fresh message.
+    const removed = this.truncateSnapshotsAt(threadId, messageId, {
+      keepTarget: false,
+    });
+    return { edited: true, removed };
+  }
+  /**
+   * Reverts in place: keeps history up to and including the given message
+   * and discards the rest. Because each run row is a full snapshot, the
+   * tail is removed by truncating every row that contains the target —
+   * later rows are not merely deleted, or the tail would reappear from
+   * remaining snapshots after a restart. Returns the removed tail for undo.
+   */
+  revertThreadToMessage(
+    threadId: string,
+    messageId: string,
+  ): Array<{ id: string; role: string; content: string }> {
+    this.requireThread(threadId);
+    return this.truncateSnapshotsAt(threadId, messageId, {
+      keepTarget: true,
+    });
+  }
+  /**
+   * Restores a previously removed tail: appends the messages back after the
+   * current state as a fresh snapshot row. Used by the undo affordance
+   * after revert/edit.
+   */
+  restoreThreadMessages(
+    threadId: string,
+    tail: Array<{ id: string; role: string; content: string }>,
+  ): { restored: number } {
+    this.requireThread(threadId);
+    const last = this.threadRuns(threadId).at(-1);
+    const current = last
+      ? (JSON.parse(last.messages) as Array<unknown>)
+      : [];
+    const snapshot = [...current, ...tail];
+    this.saveThreadRun({
+      id: randomUUID(),
+      threadId,
+      agentId: last?.agentId ?? 'chat',
+      parentRunId: null,
+      events: JSON.stringify([
+        { type: 'RESTORE', timestamp: Date.now(), count: tail.length },
+      ]),
+      messages: JSON.stringify(snapshot),
+      // The restored snapshot must sort after the current last row, or
+      // the older truncation would remain the authoritative transcript.
+      createdAt: Math.max(Date.now(), (last?.createdAt ?? 0) + 1),
+    });
+    return { restored: tail.length };
+  }
+  /**
+   * Snapshot-aware truncation. For every run row that contains the target
+   * message, the row is truncated — keeping up to the target (inclusive when
+   * keepTarget) — so no snapshot anywhere still holds the removed tail.
+   * Rows predating the target are untouched (they already end before it).
+   * Returns the removed tail as it existed in the newest snapshot.
+   */
+  private truncateSnapshotsAt(
+    threadId: string,
+    messageId: string,
+    options: { keepTarget: boolean },
+  ): Array<{ id: string; role: string; content: string }> {
+    const runs = this.threadRuns(threadId);
+    let removedTail: Array<{ id: string; role: string; content: string }> = [];
+    let found = false;
+    for (const run of runs) {
+      try {
+        const parsed = JSON.parse(run.messages) as Array<{
+          id?: string;
+          role?: string;
+          content?: string | Array<unknown>;
+        }>;
         const index = parsed.findIndex((m) => m.id === messageId);
         if (index === -1) continue;
-        if (typeof parsed[index]!.content !== 'string')
-          throw new Error('Only text messages can be edited.');
-        parsed[index]!.content = content;
+        found = true;
+        const cutoff = options.keepTarget ? index + 1 : index;
+        const tail = parsed.slice(cutoff) as Array<{
+          id: string;
+          role: string;
+          content: string;
+        }>;
+        // The newest snapshot holds the authoritative tail for undo.
+        if (tail.length >= removedTail.length) removedTail = tail;
         this.db
           .prepare(
             'UPDATE local_thread_runs SET messages=? WHERE id=? AND threadId=?',
           )
-          .run(JSON.stringify(parsed), run.id, threadId);
-        // Drop the turns that followed the edited message.
-        let truncatedRuns = 0;
-        for (let j = i + 1; j < runs.length; j++) {
-          this.db
-            .prepare('DELETE FROM local_thread_runs WHERE id=?')
-            .run(runs[j]!.id);
-          truncatedRuns += 1;
-        }
-        return { edited: true, truncatedRuns };
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('text messages'))
-          throw error;
-        /* malformed run — keep looking */
-      }
-    }
-    throw new Error('Message not found in this conversation.');
-  }
-  /**
-   * Reverts in place: keeps everything up to and including the given
-   * message and discards the rest. Fork first when the discarded tail is
-   * worth keeping.
-   */
-  revertThreadToMessage(threadId: string, messageId: string): number {
-    this.requireThread(threadId);
-    const runs = this.threadRuns(threadId);
-    for (let i = 0; i < runs.length; i++) {
-      const run = runs[i]!;
-      try {
-        const parsed = JSON.parse(run.messages) as Array<{ id?: string }>;
-        if (parsed.some((m) => m.id === messageId)) {
-          let removed = 0;
-          for (let j = i + 1; j < runs.length; j++) {
-            this.db
-              .prepare('DELETE FROM local_thread_runs WHERE id=?')
-              .run(runs[j]!.id);
-            removed += 1;
-          }
-          return removed;
-        }
+          .run(JSON.stringify(parsed.slice(0, cutoff)), run.id, threadId);
       } catch {
-        /* malformed run — skip */
+        /* malformed row — skip */
       }
     }
-    throw new Error('Message not found in this conversation.');
+    if (!found) throw new Error('Message not found in this conversation.');
+    return removedTail;
   }
   compactThreadMessages(id: string): {
     originalRuns: number;

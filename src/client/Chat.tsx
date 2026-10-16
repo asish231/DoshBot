@@ -7,7 +7,13 @@ import { computerToolResult } from './ComputerToolCard';
 import { contextualMessage, type PageContext } from './page-context';
 import { api } from './api';
 import type { Page } from '../server/pages';
-import { useEffect, useRef, useState } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+  type DragEvent as ReactDragEvent,
+} from 'react';
 import {
   CopilotChatToolCallsView,
   useRenderTool,
@@ -39,8 +45,10 @@ import {
   Image as ImageIcon,
   FolderOpen,
   FolderGit2,
+  FileUp,
 } from 'lucide-react';
 import { useSpeechToText, STT_MODELS } from './useSpeechToText';
+import { cleanClipboardHtml, isRichClipboardHtml } from './paste-utils';
 import {
   ComputerToolCard,
   type ComputerToolRenderProps,
@@ -414,8 +422,17 @@ export function Chat({
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [compactMessage, setCompactMessage] = useState<string | null>(null);
+  // The removed tail of the latest revert, held for the Undo affordance.
+  const [undoTail, setUndoTail] = useState<
+    Array<{ id: string; role: string; content: string }> | null
+  >(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  // Whole-window file drop: a depth counter keeps the overlay steady while
+  // the cursor crosses child elements.
+  const [dropActive, setDropActive] = useState(false);
+  const dropDepth = useRef(0);
+  const pasteCount = useRef(0);
   const [fullDirPath, setFullDirPath] = useState('');
   const [dirOpen, setDirOpen] = useState(false);
   const [dirDraft, setDirDraft] = useState('');
@@ -581,15 +598,45 @@ export function Chat({
   };
 
   // Revert in place: history up to this message stays, the rest is dropped.
+  // The removed tail comes back from the server so it can be restored.
   const handleRevertTo = async (messageId: string) => {
     try {
-      await api(`/conversations/${thread.id}/revert`, 'POST', { messageId });
+      const res = await api<{
+        removed: number;
+        tail: Array<{ id: string; role: string; content: string }>;
+      }>(`/conversations/${thread.id}/revert`, 'POST', { messageId });
       await copilotkit.connectAgent({ agent });
       onSaved();
-      setCompactMessage('Reverted — later turns were removed.');
-      setTimeout(() => setCompactMessage(null), 3000);
+      setUndoTail(res.tail?.length ? res.tail : null);
+      setCompactMessage(
+        `Reverted — ${res.removed} message${res.removed === 1 ? '' : 's'} removed.`,
+      );
+      setTimeout(() => {
+        setCompactMessage(null);
+        setUndoTail(null);
+      }, 8000);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not revert the chat.');
+    }
+  };
+
+  // Undo for revert: the server appends the removed tail back as a fresh
+  // snapshot row, so nothing that followed is lost.
+  const handleUndoRevert = async () => {
+    if (!undoTail) return;
+    try {
+      await api(`/conversations/${thread.id}/restore`, 'POST', {
+        tail: undoTail,
+      });
+      setUndoTail(null);
+      await copilotkit.connectAgent({ agent });
+      onSaved();
+      setCompactMessage('Restored the removed messages.');
+      setTimeout(() => setCompactMessage(null), 3000);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : 'Could not restore the messages.',
+      );
     }
   };
 
@@ -828,6 +875,14 @@ export function Chat({
           setDirIsGit(!!data.isGit);
           if (typeof data.codingEnabled === 'boolean')
             setCodingEnabled(data.codingEnabled);
+        } else {
+          // Blank by default: no folder connected — pure chat.
+          setFullDirPath('');
+          setConnectedDir('');
+          setDirDraft('');
+          setDirIsGit(false);
+          if (data && typeof data.codingEnabled === 'boolean')
+            setCodingEnabled(data.codingEnabled);
         }
       })
       .catch(() => {
@@ -868,6 +923,12 @@ export function Chat({
         setConnectedDir(parts[parts.length - 1] || data.directory);
         setDirIsGit(!!data.isGit);
         if (typeof data.codingEnabled === 'boolean')
+          setCodingEnabled(data.codingEnabled);
+      } else {
+        setFullDirPath('');
+        setConnectedDir('');
+        setDirIsGit(false);
+        if (data && typeof data.codingEnabled === 'boolean')
           setCodingEnabled(data.codingEnabled);
       }
     } catch {
@@ -916,6 +977,70 @@ export function Chat({
     } finally {
       setDirSaving(false);
     }
+  };
+
+  const handleDisconnectDirectory = async () => {
+    setDirSaving(true);
+    setDirStatus('');
+    try {
+      await api('/workspace/directory', 'POST', { directory: null });
+      setFullDirPath('');
+      setConnectedDir('');
+      setDirDraft('');
+      setDirIsGit(false);
+      setBrowseOpen(false);
+      setDirStatus('Disconnected — pure chat, no local files.');
+      onSaved();
+    } catch (error) {
+      setDirStatus(
+        error instanceof Error
+          ? error.message
+          : 'Could not disconnect the folder.',
+      );
+    } finally {
+      setDirSaving(false);
+    }
+  };
+
+  // Native OS folder picker (Finder on macOS, File Explorer on Windows).
+  // Browsers hide the absolute path for security, so the picked folder name
+  // is only a hint: the owner confirms the matching server path below via
+  // Browse… (starts at the home directory when blank) or by typing it.
+  const dirNativeInputRef = useRef<HTMLInputElement>(null);
+  const handleNativeFolderHint = (name: string) => {
+    const clean = name.trim();
+    if (clean) {
+      setDirStatus(
+        `Picked “${clean}” on this device — now select the same folder below (Browse…) or type its full path, then Verify & Connect.`,
+      );
+    }
+    setBrowseOpen(true);
+    void loadBrowse();
+  };
+  const handleNativeFolderPick = async () => {
+    const w = window as unknown as {
+      showDirectoryPicker?: () => Promise<{ name?: string }>;
+    };
+    if (typeof w.showDirectoryPicker === 'function') {
+      try {
+        const handle = await w.showDirectoryPicker();
+        if (handle?.name) handleNativeFolderHint(String(handle.name));
+      } catch {
+        /* the owner cancelled the native dialog */
+      }
+      return;
+    }
+    // Fallback for browsers without showDirectoryPicker: the classic
+    // webkitdirectory input still pops the native OS folder dialog.
+    dirNativeInputRef.current?.click();
+  };
+  const handleNativeFolderFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const first = files[0];
+    const top =
+      (first.webkitRelativePath || first.name || '').split('/')[0] || '';
+    if (dirNativeInputRef.current) dirNativeInputRef.current.value = '';
+    handleNativeFolderHint(top);
   };
 
   const handleFilesSelected = async (
@@ -987,6 +1112,46 @@ export function Chat({
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (imageInputRef.current) imageInputRef.current.value = '';
+  };
+
+  /**
+   * Paste anything: files (Finder copies, screenshots), images hiding in
+   * clipboard items, and rich content (Excel/Sheets tables, Word/Docs
+   * passages, copied web content). Files attach as files; rich HTML rides
+   * along as a text/html attachment so the Dot sees the real structure —
+   * the plain text still lands in the composer as usual.
+   */
+  const handlePaste = (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const files: File[] = Array.from(dt.files ?? []);
+    if (files.length === 0) {
+      // Some browsers only expose pasted images through items.
+      for (const item of Array.from(dt.items ?? [])) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) files.push(file);
+        }
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      void handleFilesSelected(files);
+      return;
+    }
+    const html = dt.getData('text/html');
+    if (!isRichClipboardHtml(html)) return;
+    const isTable = /<table[\s>]/i.test(html);
+    const clean = cleanClipboardHtml(html, isTable);
+    if (!clean.trim()) return;
+    const n = ++pasteCount.current;
+    const name = isTable ? `pasted-table-${n}.html` : `pasted-content-${n}.html`;
+    void handleFilesSelected([
+      new File([clean], name, { type: 'text/html' }),
+    ]);
+    // No preventDefault: the plain-text form of the paste still goes into
+    // the composer, so the message reads naturally while the structured
+    // version is attached above it.
   };
 
   const buildAttachmentContext = async (): Promise<string> => {
@@ -1144,6 +1309,27 @@ export function Chat({
       void voice.start();
     }
   }, [loaded, thread.id, voice]);
+  // A finished call may have written server-side turns (voice compute,
+  // receipts) into this same thread. Reconnect so they appear in the open
+  // chat without a manual reload — never mid text-turn.
+  const seenEndedCalls = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const newlyEnded = calls.filter(
+      (call) =>
+        (call.status === 'ended' || call.status === 'failed') &&
+        !seenEndedCalls.current.has(call.id),
+    );
+    if (newlyEnded.length === 0) return;
+    for (const call of newlyEnded) seenEndedCalls.current.add(call.id);
+    if (running) return;
+    void copilotkit.connectAgent({ agent }).catch((e) => {
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'Conversation could not reload after the call.',
+      );
+    });
+  }, [calls, running, agent, copilotkit]);
   const runErrorRef = useRef<string | null>(null);
   const userStoppedRef = useRef(false);
 
@@ -1574,7 +1760,43 @@ export function Chat({
   }, [agent.messages.length, thread.id]);
 
   return (
-    <div className="live-chat">
+    <div
+      className="live-chat"
+      onDragEnter={(e: ReactDragEvent<HTMLDivElement>) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        dropDepth.current += 1;
+        setDropActive(true);
+      }}
+      onDragOver={(e: ReactDragEvent<HTMLDivElement>) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+      }}
+      onDragLeave={(e: ReactDragEvent<HTMLDivElement>) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        dropDepth.current = Math.max(0, dropDepth.current - 1);
+        if (dropDepth.current === 0) setDropActive(false);
+      }}
+      onDrop={(e: ReactDragEvent<HTMLDivElement>) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        dropDepth.current = 0;
+        setDropActive(false);
+        if (e.dataTransfer.files.length > 0)
+          void handleFilesSelected(e.dataTransfer.files);
+      }}
+    >
+      {dropActive && (
+        <div className="drop-overlay" role="presentation">
+          <div className="drop-overlay-card">
+            <FileUp size={30} />
+            <strong>Drop files to attach</strong>
+            <span>
+              Docs, images, spreadsheets, PDFs — anything up to 50MB each
+            </span>
+          </div>
+        </div>
+      )}
       <header className="chat-persona">
         <Mascot
           identity={dot.id}
@@ -1688,6 +1910,25 @@ export function Chat({
             ) : (
               <PhoneOff size={18} />
             )}
+          </button>
+          <button
+            className={`icon-button ${codingEnabled && fullDirPath ? 'folder-on' : ''}`}
+            aria-label={
+              codingEnabled
+                ? 'Folder tools on — turn off local file access'
+                : 'Folder tools off — turn on local file access'
+            }
+            aria-pressed={codingEnabled}
+            title={
+              codingEnabled
+                ? fullDirPath
+                  ? `Folder tools on in ${fullDirPath}. Click to chat without local files.`
+                  : 'Folder tools on (no folder connected). Click to turn off.'
+                : 'Folder tools off — pure chat, no local files. Click to turn on.'
+            }
+            onClick={() => void toggleFolderTools()}
+          >
+            {codingEnabled ? <FolderGit2 size={18} /> : <FolderOpen size={18} />}
           </button>
           {onDeleteConversation && (
             <button
@@ -1974,20 +2215,20 @@ export function Chat({
         {compactMessage && (
           <div className="compact-toast-banner">
             <span>{compactMessage}</span>
+            {undoTail && (
+              <button
+                type="button"
+                className="compact-toast-undo"
+                onClick={() => void handleUndoRevert()}
+              >
+                Undo
+              </button>
+            )}
           </div>
         )}
         <div
           className="chat-composer-box"
           style={{ position: 'relative' }}
-          onDragOver={(e) => {
-            if (e.dataTransfer.types.includes('Files')) e.preventDefault();
-          }}
-          onDrop={(e) => {
-            if (e.dataTransfer.files.length > 0) {
-              e.preventDefault();
-              void handleFilesSelected(e.dataTransfer.files);
-            }
-          }}
         >
           {slashMenuOpen && (
             <SlashCommandsMenu
@@ -2046,19 +2287,13 @@ export function Chat({
           <textarea
             ref={textareaRef}
             aria-label="Message your Dot"
-            placeholder={`Message ${dot.name} — type / for commands, + to attach files… (drop or paste images too)`}
+            placeholder={`Message ${dot.name} — type / for commands, + to attach files… (drop or paste anything: images, docs, Excel)`}
             rows={1}
             value={draft}
             maxLength={12000}
             onChange={(e) => handleDraftChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            onPaste={(e) => {
-              const files = e.clipboardData.files;
-              if (files.length > 0) {
-                e.preventDefault();
-                void handleFilesSelected(files);
-              }
-            }}
+            onPaste={handlePaste}
           />
           <input
             ref={fileInputRef}
@@ -2205,16 +2440,16 @@ export function Chat({
                     codingEnabled
                       ? fullDirPath
                         ? `Coding workspace: ${fullDirPath}. Click to change (Claude / DSH-style local folder).`
-                        : 'Connect a local folder to code in (Claude / DSH-style)'
+                        : 'No folder connected (blank by default). Click to choose one with your OS folder picker, browse, or type a path.'
                       : 'Folder tools are off — click to turn them on.'
-                  }
-                >
-                  <FolderGit2 size={13} />
-                  <span>
-                    {codingEnabled
-                      ? connectedDir || 'Connect folder'
-                      : 'No folder'}
-                  </span>
+                    }
+                  >
+                    <FolderGit2 size={13} />
+                    <span>
+                      {codingEnabled
+                        ? connectedDir || 'Connect folder'
+                        : 'No folder'}
+                    </span>
                   {codingEnabled && dirIsGit && (
                     <span className="dir-git-dot" title="Git repo detected">
                       ●
@@ -2280,10 +2515,50 @@ export function Chat({
                         type="text"
                         value={dirDraft}
                         onChange={(e) => setDirDraft(e.target.value)}
-                        placeholder="/Users/you/my-project"
+                        placeholder="No folder — type a full path, e.g. /Users/you/my-project"
                         spellCheck={false}
                         style={{ fontFamily: 'monospace', fontSize: '12px' }}
                       />
+                      <input
+                        ref={(el) => {
+                          dirNativeInputRef.current = el;
+                          if (el) el.setAttribute('webkitdirectory', '');
+                        }}
+                        type="file"
+                        multiple
+                        aria-hidden="true"
+                        tabIndex={-1}
+                        // Visually hidden but NOT display:none: Safari ignores
+                        // programmatic .click() on display:none file inputs,
+                        // so the OS folder dialog would never open there.
+                        style={{
+                          position: 'fixed',
+                          width: 1,
+                          height: 1,
+                          opacity: 0,
+                          pointerEvents: 'none',
+                        }}
+                        onChange={(e) =>
+                          handleNativeFolderFiles(e.target.files)
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="chat-popover-item"
+                        style={{ marginTop: 6 }}
+                        onClick={() => void handleNativeFolderPick()}
+                        title="Open your OS folder picker (Finder / File Explorer) to choose a folder"
+                      >
+                        <FolderOpen size={15} />
+                        <div className="chat-effort-col">
+                          <span className="chat-item-name">
+                            Choose on this device…
+                          </span>
+                          <span className="chat-item-desc">
+                            Pops open Finder / File Explorer
+                          </span>
+                        </div>
+                      </button>
                       {fullDirPath && (
                         <div className="dir-current" title={fullDirPath}>
                           Current: {fullDirPath}
@@ -2400,6 +2675,14 @@ export function Chat({
                           onClick={() => void handleConnectDirectory()}
                         >
                           {dirSaving ? 'Verifying…' : 'Verify & Connect'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={dirSaving || !fullDirPath}
+                          title="Disconnect the folder — pure chat, no local files"
+                          onClick={() => void handleDisconnectDirectory()}
+                        >
+                          Disconnect
                         </button>
                         <button
                           type="button"

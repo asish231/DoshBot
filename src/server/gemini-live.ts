@@ -4,12 +4,19 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { ServerType } from '@hono/node-server';
 import type { Platform } from './platform.js';
+import type { WsTicketStore } from './ws-tickets.js';
+import type { AuthStore } from './auth.js';
+import { voiceCapabilityPrompt } from '../shared/voice-catalog.js';
 
 export interface GeminiLiveOptions {
   /** When set, WebSocket upgrades must present this token (query param `token`). */
   ownerToken?: string;
   /** Expected browser origin; upgrades with a different Origin header are rejected. */
   origin?: string;
+  /** Single-use tickets issued via POST /api/voice/ws-ticket. */
+  wsTickets?: WsTicketStore;
+  /** Accounts, for resolving the break-glass owner on legacy token upgrades. */
+  auth?: AuthStore;
 }
 
 function tokenEquals(expected: string, supplied: string): boolean {
@@ -28,29 +35,56 @@ export function attachGeminiLiveHandler(
   const authorizeUpgrade = (
     request: IncomingMessage,
     url: URL,
-  ): true | string => {
+  ): { ok: true; userId?: string } | { ok: false; reason: string } => {
     const allowedHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
     if (options.origin) allowedHosts.add(new URL(options.origin).hostname);
     const hostHeader = request.headers.host || '';
     const hostName = hostHeader.split(':')[0];
     if (!options.ownerToken && !allowedHosts.has(hostName))
-      return 'Unrecognized host.';
+      return { ok: false, reason: 'Unrecognized host.' };
     if (hostHeader) {
       const requestOrigin = request.headers.origin;
       const expectedOrigin =
         options.origin ??
         `${request.headers['x-forwarded-proto'] ?? url.protocol.replace(':', '')}://${hostHeader}`;
       if (requestOrigin && requestOrigin !== expectedOrigin)
-        return 'Cross-origin WebSocket requests are not allowed.';
+        return {
+          ok: false,
+          reason: 'Cross-origin WebSocket requests are not allowed.',
+        };
     }
     if (request.headers['sec-fetch-site'] === 'cross-site')
-      return 'Cross-site WebSocket requests are not allowed.';
+      return {
+        ok: false,
+        reason: 'Cross-site WebSocket requests are not allowed.',
+      };
+    // Preferred: a single-use ticket from POST /api/voice/ws-ticket — the
+    // long-lived owner token never appears in the URL. The ticket carries
+    // the minting user, whose thread ownership is enforced on connect.
+    // The token query param stays as a legacy fallback for older clients.
+    const ticket = url.searchParams.get('ticket');
+    if (options.wsTickets && ticket) {
+      const minted = options.wsTickets.consume(ticket);
+      if (!minted)
+        return {
+          ok: false,
+          reason: 'This voice link expired. Reconnect from the app.',
+        };
+      return { ok: true, userId: minted.userId };
+    }
     if (options.ownerToken) {
       const supplied = url.searchParams.get('token') ?? '';
       if (!tokenEquals(options.ownerToken, supplied))
-        return 'Enter your owner access token to unlock OpenDots.';
+        return {
+          ok: false,
+          reason: 'Enter your owner access token to unlock OpenDots.',
+        };
+      return {
+        ok: true,
+        userId: options.auth ? options.auth.breakGlassUser().id : undefined,
+      };
     }
-    return true;
+    return { ok: true };
   };
 
   server.on(
@@ -60,22 +94,26 @@ export function attachGeminiLiveHandler(
       const url = new URL(request.url || '', `http://${hostHeader}`);
       if (url.pathname !== '/api/voice/gemini-live') return;
       const verdict = authorizeUpgrade(request, url);
-      if (verdict !== true) {
+      if (!verdict.ok) {
         socket.write(
-          `HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n${verdict}`,
+          `HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n${verdict.reason}`,
         );
         socket.destroy();
         return;
       }
       wss.handleUpgrade(request, socket, head, (clientWs) => {
-        wss.emit('connection', clientWs, request);
+        wss.emit('connection', clientWs, request, verdict.userId);
       });
     },
   );
 
   wss.on(
     'connection',
-    async (clientWs: WebSocket, request: IncomingMessage) => {
+    async (
+      clientWs: WebSocket,
+      request: IncomingMessage,
+      upgradeUser?: string,
+    ) => {
       const hostHeader = request.headers.host || '127.0.0.1';
       const url = new URL(request.url || '', `http://${hostHeader}`);
       const threadId = url.searchParams.get('threadId');
@@ -133,7 +171,7 @@ export function attachGeminiLiveHandler(
       let thread;
       let dot;
       try {
-        thread = platform.workspace.requireThread(threadId);
+        thread = platform.workspace.requireThread(threadId, undefined, upgradeUser);
         dot = platform.workspace.dot(thread.dotId);
       } catch {
         // ignore
@@ -183,10 +221,32 @@ export function attachGeminiLiveHandler(
                 },
               },
             },
+            tools: [
+              {
+                functionDeclarations: [
+                  {
+                    name: 'ask_compute',
+                    description:
+                      'Run a task in this same conversation: research, write or run code, show content in the chat. The result appears in the conversation for the owner.',
+                    parameters: {
+                      type: 'object',
+                      properties: {
+                        request: {
+                          type: 'string',
+                          description:
+                            'The task to perform or the content to show in the chat.',
+                        },
+                      },
+                      required: ['request'],
+                    },
+                  },
+                ],
+              },
+            ],
             systemInstruction: {
               parts: [
                 {
-                  text: `You are ${dot.name}. Continue this existing conversation. Prior conversation context: ${JSON.stringify(historyText)}. Your role: ${dot.instructions}. Keep spoken responses short, natural, and conversational.`,
+                  text: `You are ${dot.name}. Continue this existing conversation. Prior conversation context: ${JSON.stringify(historyText)}. Your role: ${dot.instructions}. ${voiceCapabilityPrompt({ hasComputeTool: true })}`,
                 },
               ],
             },
@@ -194,6 +254,62 @@ export function attachGeminiLiveHandler(
         };
         googleWs.send(JSON.stringify(setupMessage));
       });
+
+      // Ask-compute turns used by this call, capped like the OpenAI path.
+      let computeCalls = 0;
+      const sendToolResponse = (result: string) => {
+        if (googleWs.readyState !== WebSocket.OPEN) return;
+        try {
+          googleWs.send(
+            JSON.stringify({
+              realtimeInput: {
+                toolResponse: {
+                  functionResponses: [
+                    { name: 'ask_compute', response: { result } },
+                  ],
+                },
+              },
+            }),
+          );
+        } catch {
+          /* Google socket already closing; nothing to answer into */
+        }
+      };
+      const handleCompute = async (args: Record<string, unknown>) => {
+        if (computeCalls >= 6) {
+          sendToolResponse(
+            'This call reached its six compute-turn limit. Tell the owner to start a new call to continue.',
+          );
+          return;
+        }
+        const request =
+          typeof args.request === 'string' ? args.request.trim() : '';
+        if (!request) {
+          sendToolResponse('The request was empty; ask the owner what to do.');
+          return;
+        }
+        computeCalls += 1;
+        clientWs.send(JSON.stringify({ type: 'thinking' }));
+        try {
+          const result = await platform.turn(
+            threadId,
+            request,
+            AbortSignal.timeout(90_000),
+          );
+          sendToolResponse(
+            (typeof result === 'string' ? result : 'Done.').slice(0, 30_000),
+          );
+        } catch (e) {
+          const reason =
+            e instanceof Error ? e.message : 'unknown error';
+          sendToolResponse(
+            `The task could not run in the chat (${reason}). Tell the owner what you attempted and offer to retry.`.slice(
+              0,
+              1000,
+            ),
+          );
+        }
+      };
 
       googleWs.on('message', (data: import('ws').RawData) => {
         try {
@@ -214,6 +330,16 @@ export function attachGeminiLiveHandler(
                     }),
                   );
                 }
+                // Tool calls: run the task in this conversation and hand
+                // the result back so the Dot can continue speaking.
+                if (
+                  part.functionCall?.name === 'ask_compute' &&
+                  part.functionCall.args &&
+                  typeof part.functionCall.args === 'object'
+                )
+                  void handleCompute(
+                    part.functionCall.args as Record<string, unknown>,
+                  );
               }
             }
 

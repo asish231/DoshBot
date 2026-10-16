@@ -5,6 +5,25 @@ import {
 } from '@copilotkit/runtime/v2';
 import type { WorkspaceStore } from './workspace.js';
 
+/**
+ * Pushes a corrected message list into the live in-memory thread store.
+ * SQLite persistence already truncates run snapshots, but the running
+ * process serves the transcript from ɵGLOBAL_STORE — without this sync,
+ * a revert/edit/restore would only appear after a server restart.
+ * Safe when the thread was never loaded in memory (no-op).
+ */
+export function setLiveSnapshot(
+  threadId: string,
+  messages: unknown[],
+): void {
+  try {
+    const store = ɵGLOBAL_STORE.peek(threadId);
+    if (store) store.messagesSnapshot = messages as never;
+  } catch {
+    /* store unavailable (e.g. unit tests without the runtime) */
+  }
+}
+
 export class PersistentLocalRunner extends InMemoryAgentRunner {
   private static storeHooked = false;
 

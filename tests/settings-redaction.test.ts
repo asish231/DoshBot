@@ -23,6 +23,15 @@ describe('settings redaction', () => {
     expect(out.secrets?.telegramBotToken).toBe(true);
   });
 
+  it('masks the custom provider key and reports its presence', () => {
+    const out = redactSettings({
+      ...base,
+      customApiKey: 'ollama-secret',
+    });
+    expect(out.customApiKey).toBeNull();
+    expect(out.secrets?.customApiKey).toBe(true);
+  });
+
   it('masks voice API keys but keeps labels and providers', () => {
     const out = redactSettings({
       ...base,

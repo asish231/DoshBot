@@ -108,9 +108,18 @@ export class DotAgent extends AbstractAgent {
             input.threadId,
             dot.id,
           );
-          if (!this.config.apiKey || !this.config.model)
-            throw new Error('Model configuration is required.');
           const initialSettings = this.store.settings();
+          // Local/custom provider from Settings overrides the .env endpoint,
+          // so a connected Ollama / LM Studio box serves every turn —
+          // including server-side voice and scheduled turns.
+          const effectiveApiKey =
+            initialSettings.customApiKey || this.config.apiKey;
+          const effectiveBaseUrl =
+            initialSettings.customBaseUrl ||
+            this.config.baseUrl ||
+            'https://api.openai.com/v1';
+          if (!effectiveApiKey || !this.config.model)
+            throw new Error('Model configuration is required.');
           // Budget hard stop (Paperclip-style cost governance): a Dot over its
           // monthly estimated-token budget refuses new runs until the owner
           // raises the budget or resets usage.
@@ -358,13 +367,23 @@ export class DotAgent extends AbstractAgent {
             ),
           );
 
+          // Local Codex CLI: only surface codex_task when the binary exists
+          // on this machine (cached, best-effort — a missing CLI hides it).
+          let codexAvailable = false;
+          try {
+            const { getCodexStatus } = await import('./codex.js');
+            codexAvailable = (await getCodexStatus()).available;
+          } catch {
+            /* codex detection is best-effort; the tool stays hidden */
+          }
+
           const selectedModel =
             dot.model || initialSettings.model || this.config.model;
           const selectedReasoningEffort =
             dot.reasoningEffort || initialSettings.reasoningEffort;
           const adapter = openaiCompatibleText(selectedModel, {
-            apiKey: this.config.apiKey,
-            baseURL: this.config.baseUrl ?? 'https://api.openai.com/v1',
+            apiKey: effectiveApiKey,
+            baseURL: effectiveBaseUrl,
             api: 'chat-completions',
             maxRetries: 1,
           });
@@ -454,6 +473,59 @@ export class DotAgent extends AbstractAgent {
                 tokens: result.tokens,
                 cost: result.cost,
               };
+            },
+          });
+          // Local Codex CLI inside chat: delegates coding tasks to the `codex
+          // exec` non-interactive agent on this machine (cloud account or a
+          // local OSS provider like Ollama / LM Studio). Mirrors the
+          // opencode_task bridge for hosts where Codex is installed.
+          const codexBridge = defineTool({
+            name: 'codex_task',
+            description: `Delegate a coding task to the local Codex CLI (runs non-interactively in the connected workspace). Use when Codex is installed here, for repo edits, reviews, or a second coding engine alongside opencode_task. Set localProvider to 'ollama' or 'lmstudio' to run fully local OSS models served on this machine. Returns Codex's final message.`,
+            parameters: z.object({
+              task: z
+                .string()
+                .min(1)
+                .max(20000)
+                .describe('Natural-language coding task for Codex.'),
+              model: z
+                .string()
+                .optional()
+                .describe(
+                  'Optional Codex model id (e.g. gpt-5). Defaults to the CLI default.',
+                ),
+              localProvider: z
+                .enum(['ollama', 'lmstudio'])
+                .optional()
+                .describe(
+                  'Run fully local: use an OSS provider served on this machine instead of the cloud account.',
+                ),
+              sandbox: z
+                .enum(['read-only', 'workspace-write'])
+                .optional()
+                .describe(
+                  'Sandbox for model-run shell commands. Defaults to workspace-write.',
+                ),
+            }),
+            execute: async ({ task, model, localProvider, sandbox }) => {
+              check();
+              if (effectivePermissions.bash === 'deny') {
+                throw new Error(
+                  'Codex delegation is denied by workspace coding permissions.',
+                );
+              }
+              const { runCodex } = await import('./codex.js');
+              const result = await runCodex({
+                message: task,
+                model,
+                localProvider,
+                sandbox,
+                workdir: effectiveWorkdir,
+                timeoutMs: 300000,
+              });
+              if (result.error) throw new Error(result.error);
+              check();
+              return { text: result.text.slice(0, 24000) };
             },
           });
           // Agent swarm: parallel specialist subagents via the native OpenCode engine.
@@ -957,11 +1029,17 @@ export class DotAgent extends AbstractAgent {
                   timeout,
                 ]);
                 check();
+                // The delegated thread runs under its owner's identity.
+                const internalToken = agentConfig.auth?.mintInternalToken(
+                  thread.ownerId,
+                );
                 const reply = await runThreadTurn(
                   agentConfig.runtimeUrl,
-                  agentConfig.ownerToken
-                    ? { Authorization: `Bearer ${agentConfig.ownerToken}` }
-                    : {},
+                  internalToken
+                    ? { Authorization: `Bearer ${internalToken}` }
+                    : agentConfig.ownerToken
+                      ? { Authorization: `Bearer ${agentConfig.ownerToken}` }
+                      : {},
                   thread.dotId,
                   thread.id,
                   message,
@@ -1367,7 +1445,13 @@ export class DotAgent extends AbstractAgent {
                 : tool.name === 'save_session_memory' ||
                   tool.name === 'save_global_memory',
             ),
-            ...(codingEnabled ? [openCodeBridge, subagentSwarm] : []),
+            ...(codingEnabled
+              ? [
+                  openCodeBridge,
+                  subagentSwarm,
+                  ...(codexAvailable ? [codexBridge] : []),
+                ]
+              : []),
             ...mcpTools,
             scheduleTool,
             ...skillsTools,

@@ -27,9 +27,17 @@ function safeParse(value: string | null | undefined): unknown[] | null {
 
 /** Settings shape safe to send to the browser: credential values masked, presence kept. */
 export function redactSettings(settings: Settings): Settings {
-  const out: Settings = { ...settings, telegramBotToken: null };
+  const out: Settings = {
+    ...settings,
+    telegramBotToken: null,
+    customApiKey: null,
+    whatsappAccessToken: null,
+    whatsappVerifyToken: null,
+    twilioAuthToken: null,
+  };
   out.secrets = {
     telegramBotToken: Boolean(settings.telegramBotToken),
+    customApiKey: Boolean(settings.customApiKey),
     voiceApiKeys: 0,
     connectors: 0,
   };
@@ -69,6 +77,8 @@ export function resolveSettingsPatch(
   delete out.secrets;
   if (out.telegramBotToken === SAVED_SENTINEL)
     out.telegramBotToken = previous.telegramBotToken ?? null;
+  if (out.customApiKey === SAVED_SENTINEL)
+    out.customApiKey = previous.customApiKey ?? null;
   if (typeof out.voiceApiKeys === 'string') {
     const incoming = safeParse(out.voiceApiKeys);
     if (incoming) {

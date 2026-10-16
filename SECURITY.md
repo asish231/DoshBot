@@ -1,11 +1,12 @@
 # Security
 
-OpenDots is an application template under development, not a hosted service. The local prototype is single-owner; Space membership, Slack identity mapping, and voice delegation require additional enforcement before connected multi-user use. It is not a security-audited autonomous agent.
+OpenDots supports multi-user accounts. Sign-up creates the first account as the owner (adopting the pre-existing single-owner data); later accounts are members. Sessions are 30-day random tokens stored only as SHA-256 hashes; passwords are scrypt-hashed with per-user salts. OWNER_TOKEN remains as break-glass access to the owner account for recovery and server-to-server use. Repeated failed sign-in, signup, and token attempts are rate-limited per client, and the voice WebSocket is authorized with single-use, short-lived tickets bound to the signed-in user instead of any credential in the URL.
 
 ## Intended boundary
 
-- Run local development on loopback.
+- Run local development on loopback. Before the first account exists the deployment stays open (bootstrap mode); creating the owner account locks every API route behind sign-in.
 - Protect remote deployments with authentication and HTTPS.
+- Per-user isolation is enforced at the data layer: conversations, session/task memories, scheduled tasks, long-term memories, uploads, voice calls, and CopilotKit thread access are scoped to the signed-in owner. Another user's thread id reads as missing. Server-wide settings, the Dot catalog, computers, and connected channels are owner-managed resources.
 - Keep the browser service isolated from the application host and private networks. Do not expose its port publicly.
 - Keep Intelligence, model, speech, and browser credentials on the server. Never commit `.env` files or local databases.
 - Treat page text, uploaded content, and model output as untrusted data, not authorization to change permissions.
