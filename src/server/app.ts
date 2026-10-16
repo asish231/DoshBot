@@ -115,8 +115,7 @@ export function createApp({
     // user sees only their own data. OWNER_TOKEN stays as break-glass
     // access to the owner account. Without an auth store the legacy
     // single-token gate applies unchanged.
-    const bearer =
-      c.req.header('authorization')?.replace(/^Bearer /, '') ?? '';
+    const bearer = c.req.header('authorization')?.replace(/^Bearer /, '') ?? '';
     const client =
       c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
       c.req.header('x-real-ip') ||
@@ -213,9 +212,7 @@ export function createApp({
         : Boolean(ownerToken),
       // On externally-protected deployments the very first signup must
       // prove control of OWNER_TOKEN; loopback dev without it is open.
-      setupRequiresToken: Boolean(
-        auth && ownerToken && auth.userCount() === 0,
-      ),
+      setupRequiresToken: Boolean(auth && ownerToken && auth.userCount() === 0),
       user: c.get('user') ?? null,
     }),
   );
@@ -238,10 +235,7 @@ export function createApp({
         { error: 'Enter an email and a password of at least 8 characters.' },
         400,
       );
-    if (
-      auth.userCount() > 0 &&
-      store.settings().allowSignups === false
-    )
+    if (auth.userCount() > 0 && store.settings().allowSignups === false)
       return c.json({ error: 'New signups are disabled by the owner.' }, 403);
     // Owner-squat protection: the signup that bootstrap-creates the owner
     // account must prove control of this deployment when a break-glass
@@ -262,11 +256,9 @@ export function createApp({
     const key = `signup|${client}`;
     const waitMs = authLimiter?.blockedFor(key) ?? 0;
     if (waitMs > 0)
-      return c.json(
-        { error: 'Too many attempts. Try again shortly.' },
-        429,
-        { 'Retry-After': String(Math.ceil(waitMs / 1000)) },
-      );
+      return c.json({ error: 'Too many attempts. Try again shortly.' }, 429, {
+        'Retry-After': String(Math.ceil(waitMs / 1000)),
+      });
     try {
       const { user, token } = auth.signup(
         parsed.data.email,
@@ -327,18 +319,14 @@ export function createApp({
       return c.json(
         {
           error:
-            error instanceof AuthError
-              ? error.message
-              : 'Could not sign in.',
+            error instanceof AuthError ? error.message : 'Could not sign in.',
         },
         401,
       );
     }
   });
   app.post('/api/auth/logout', (c) => {
-    auth?.logout(
-      c.req.header('authorization')?.replace(/^Bearer /, '') ?? '',
-    );
+    auth?.logout(c.req.header('authorization')?.replace(/^Bearer /, '') ?? '');
     return c.json({ ok: true });
   });
   app.get('/api/auth/me', (c) => {
@@ -395,7 +383,8 @@ export function createApp({
         ? body.data
             .map((m) => m?.id)
             .filter(
-              (id): id is string => typeof id === 'string' && id.trim().length > 0,
+              (id): id is string =>
+                typeof id === 'string' && id.trim().length > 0,
             )
             .map((id) => id.trim())
         : [];
@@ -408,8 +397,8 @@ export function createApp({
   }): boolean =>
     Boolean(
       auth &&
-        auth.userCount() > 0 &&
-        (c.get('user') as AuthUser | undefined)?.role !== 'owner',
+      auth.userCount() > 0 &&
+      (c.get('user') as AuthUser | undefined)?.role !== 'owner',
     );
   app.post('/api/provider/test', async (c) => {
     if (requireProviderOwner(c))
@@ -581,7 +570,10 @@ export function createApp({
     // owner's levers; members cannot change them.
     const actor = c.get('user');
     if (auth && auth.userCount() > 0 && actor?.role !== 'owner')
-      return c.json({ error: 'Only the owner can change these settings.' }, 403);
+      return c.json(
+        { error: 'Only the owner can change these settings.' },
+        403,
+      );
     const parsed = z
       .object({
         name: z.string().trim().min(1).max(40).optional(),
@@ -603,7 +595,13 @@ export function createApp({
         codingEnabled: z.boolean().optional(),
         codingPermissions: z.string().max(4096).nullable().optional(),
         opencodeVariant: z.string().trim().max(50).nullable().optional(),
-        taskForceMaxHours: z.number().int().min(1).max(24).nullable().optional(),
+        taskForceMaxHours: z
+          .number()
+          .int()
+          .min(1)
+          .max(24)
+          .nullable()
+          .optional(),
         taskForceMaxWorkers: z
           .number()
           .int()
@@ -611,7 +609,13 @@ export function createApp({
           .max(100000)
           .nullable()
           .optional(),
-        taskForceConcurrency: z.number().int().min(1).max(64).nullable().optional(),
+        taskForceConcurrency: z
+          .number()
+          .int()
+          .min(1)
+          .max(64)
+          .nullable()
+          .optional(),
         allowSignups: z.boolean().optional(),
         computerEnvironment: z.string().trim().max(50).nullable().optional(),
         voiceTelephonyProvider: z.string().trim().max(50).nullable().optional(),
@@ -641,9 +645,7 @@ export function createApp({
   });
   app.get('/api/memories', (c) => {
     const category = c.req.query('category');
-    return c.json(
-      store.memories(category || undefined, c.get('user')?.id),
-    );
+    return c.json(store.memories(category || undefined, c.get('user')?.id));
   });
   app.post('/api/memories', async (c) => {
     const parsed = z
@@ -897,7 +899,8 @@ export function createApp({
     store.deleteArtifact(c.req.param('id'))
       ? c.json({ ok: true })
       : c.json({ error: 'Artifact not found.' }, 404),
-  );  app.post('/api/memories/:id/links', async (c) => {
+  );
+  app.post('/api/memories/:id/links', async (c) => {
     const parsed = z
       .object({
         toId: z.string().trim().min(1).max(100),
@@ -935,34 +938,45 @@ export function createApp({
       : c.json({ error: 'Link not found.' }, 404),
   );
   app.get('/api/skills', (c) => {
-    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
+    if (!store.skills)
+      return c.json({ error: 'Skills storage is not configured.' }, 503);
     return c.json(store.skills.list());
   });
   app.get('/api/skills/:name', (c) => {
-    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
+    if (!store.skills)
+      return c.json({ error: 'Skills storage is not configured.' }, 503);
     const skill = store.skills.get(c.req.param('name'));
     return skill ? c.json(skill) : c.json({ error: 'Skill not found.' }, 404);
   });
   app.post('/api/skills', async (c) => {
-    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
-    const parsed = skillInputSchema
-      .safeParse(await c.req.json().catch(() => null));
+    if (!store.skills)
+      return c.json({ error: 'Skills storage is not configured.' }, 503);
+    const parsed = skillInputSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
     if (!parsed.success)
       return c.json(
-        { error: 'Skill needs a lowercase-hyphen name (1-60), description (1-400), and instructions (1-100000).' },
+        {
+          error:
+            'Skill needs a lowercase-hyphen name (1-60), description (1-400), and instructions (1-100000).',
+        },
         400,
       );
     try {
       return c.json(store.skills.create(parsed.data), 201);
     } catch (error) {
       return c.json(
-        { error: error instanceof Error ? error.message : 'Could not create skill.' },
+        {
+          error:
+            error instanceof Error ? error.message : 'Could not create skill.',
+        },
         409,
       );
     }
   });
   app.put('/api/skills/:name', async (c) => {
-    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
+    if (!store.skills)
+      return c.json({ error: 'Skills storage is not configured.' }, 503);
     const parsed = z
       .object({
         name: skillInputSchema.shape.name.optional(),
@@ -972,19 +986,27 @@ export function createApp({
       .strict()
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success || Object.keys(parsed.data).length === 0)
-      return c.json({ error: 'Provide a name, description, or instructions to update.' }, 400);
+      return c.json(
+        { error: 'Provide a name, description, or instructions to update.' },
+        400,
+      );
     try {
       return c.json(store.skills.update(c.req.param('name'), parsed.data));
     } catch (error) {
-      const status = error instanceof Error && /not found/i.test(error.message) ? 404 : 409;
+      const status =
+        error instanceof Error && /not found/i.test(error.message) ? 404 : 409;
       return c.json(
-        { error: error instanceof Error ? error.message : 'Could not update skill.' },
+        {
+          error:
+            error instanceof Error ? error.message : 'Could not update skill.',
+        },
         status,
       );
     }
   });
   app.delete('/api/skills/:name', (c) => {
-    if (!store.skills) return c.json({ error: 'Skills storage is not configured.' }, 503);
+    if (!store.skills)
+      return c.json({ error: 'Skills storage is not configured.' }, 503);
     return store.skills.delete(c.req.param('name'))
       ? c.json({ ok: true })
       : c.json({ error: 'Skill not found.' }, 404);

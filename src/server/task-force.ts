@@ -1,8 +1,5 @@
 import type { Store } from './store.js';
-import {
-  TaskForceStore,
-  parseTaskForceConfig,
-} from './task-force-store.js';
+import { TaskForceStore, parseTaskForceConfig } from './task-force-store.js';
 import type {
   TaskForceConfig,
   TaskForceMemory,
@@ -79,10 +76,7 @@ export interface Elite {
   perspective: string;
 }
 
-export function selectElites(
-  candidates: Elite[],
-  count = 3,
-): Elite[] {
+export function selectElites(candidates: Elite[], count = 3): Elite[] {
   return [...candidates]
     .sort((a, b) => b.fitness - a.fitness)
     .filter((c) => c.fitness > 0)
@@ -108,8 +102,13 @@ export function parseDirectives(text: string, max: number): string[] {
 }
 
 /** Population growth per generation, capped by the wave ceiling. */
-export function nextWaveSize(config: TaskForceConfig, generation: number): number {
-  const grown = Math.round(config.waveSize * Math.pow(1.5, Math.max(0, generation - 1)));
+export function nextWaveSize(
+  config: TaskForceConfig,
+  generation: number,
+): number {
+  const grown = Math.round(
+    config.waveSize * Math.pow(1.5, Math.max(0, generation - 1)),
+  );
   return Math.max(1, Math.min(config.maxWave, grown));
 }
 
@@ -125,7 +124,12 @@ export function titleFrom(text: string): string {
   const firstLine =
     text
       .split('\n')
-      .map((l) => l.replace(/^#{1,6}\s*[-*•]?\s*/, '').replace(/^[-*•]\s*/, '').trim())
+      .map((l) =>
+        l
+          .replace(/^#{1,6}\s*[-*•]?\s*/, '')
+          .replace(/^[-*•]\s*/, '')
+          .trim(),
+      )
       .find((l) => l.length > 0) ?? 'Finding';
   return firstLine.slice(0, 80);
 }
@@ -179,7 +183,7 @@ export function buildWorkerPrompt(input: {
       ? `DEEP-DIVE SUB-AGENT RESULTS (from sub-swarms spawned by this mission's earlier workers — build on them, do not repeat them):\n- ${input.subResults.join('\n- ')}`
       : '',
     'Produce your single best contribution to the mission: dense, self-contained analysis or research notes (roughly 300-1200 words), with short markdown headings and bullets.',
-    'Stay inside the mission\'s scope. State assumptions in one line. Do not ask questions and do not refuse — reason from the mission context and your expertise.',
+    "Stay inside the mission's scope. State assumptions in one line. Do not ask questions and do not refuse — reason from the mission context and your expertise.",
     `You may spawn your own sub-agents: end with up to ${input.maxDirectives} lines of "SPAWN_DEEP_DIVE: <precise sub-topic>" for sub-topics that deserve a dedicated recursive swarm of their own. Those sub-agents can in turn spawn their own. Use this power for genuine depth, not for routine work.`,
   ]
     .filter(Boolean)
@@ -258,12 +262,11 @@ export class TaskForceEngine {
     private tf: TaskForceStore,
     private options: TaskForceEngineOptions = {},
   ) {
-    this.semaphore = new Semaphore(
-      () =>
-        Math.min(
-          64,
-          Math.max(1, this.store.settings().taskForceConcurrency ?? 12),
-        ),
+    this.semaphore = new Semaphore(() =>
+      Math.min(
+        64,
+        Math.max(1, this.store.settings().taskForceConcurrency ?? 12),
+      ),
     );
   }
 
@@ -324,8 +327,7 @@ export class TaskForceEngine {
     const cap = this.maxHours();
     const requested = input.hours ?? 6;
     const hours = Math.min(cap, Math.max(0.25, requested));
-    const deadline =
-      input.deadlineOverride ?? this.now() + hours * 3_600_000;
+    const deadline = input.deadlineOverride ?? this.now() + hours * 3_600_000;
     const base = parseTaskForceConfig(
       JSON.stringify({
         ...this.sessionConfigDefaults(),
@@ -426,7 +428,11 @@ export class TaskForceEngine {
           await this.finalize(sessionId, 'worker budget reached');
           break;
         }
-        const converged = await this.runGeneration(session, config, controller.signal);
+        const converged = await this.runGeneration(
+          session,
+          config,
+          controller.signal,
+        );
         if (converged) {
           await this.finalize(sessionId, 'converged');
           break;
@@ -468,7 +474,8 @@ export class TaskForceEngine {
         perspective:
           PERSPECTIVES[(generation + i) % PERSPECTIVES.length]! +
           MUTATIONS[i % MUTATIONS.length]!,
-        parentWorkerId: elites[i % Math.max(1, elites.length)]?.workerId ?? null,
+        parentWorkerId:
+          elites[i % Math.max(1, elites.length)]?.workerId ?? null,
       }),
     );
     await Promise.all(
@@ -483,7 +490,9 @@ export class TaskForceEngine {
               perspective: worker.perspective,
               generation,
               eliteSummaries: elites.map((e) => e.summary).slice(0, 5),
-              ownMemories: parent ? [`${parent.perspective}: ${parent.summary}`] : [],
+              ownMemories: parent
+                ? [`${parent.perspective}: ${parent.summary}`]
+                : [],
               subResults: subDeposits,
               deliverables: config.deliverables,
               maxDirectives: config.maxDirectivesPerWorker,
@@ -504,11 +513,11 @@ export class TaskForceEngine {
               summary: summarizeText(finding),
               content: finding,
             });
-            if (parent) this.tf.link(memory.id, parent.memoryId, 'evolved_from');
+            if (parent)
+              this.tf.link(memory.id, parent.memoryId, 'evolved_from');
           } catch (error) {
             this.tf.finishWorker(worker.id, {
-              error:
-                error instanceof Error ? error.message : 'Worker failed.',
+              error: error instanceof Error ? error.message : 'Worker failed.',
             });
           } finally {
             this.semaphore.release();
@@ -582,14 +591,8 @@ export class TaskForceEngine {
           if (existing + spawned >= config.maxSubSessions) break outer;
           const remaining = session.deadline - this.now();
           if (remaining <= 5 * 60_000) break outer;
-          const share = Math.max(
-            15 * 60_000,
-            Math.floor(remaining / 4),
-          );
-          const childDeadline = Math.min(
-            session.deadline,
-            this.now() + share,
-          );
+          const share = Math.max(15 * 60_000, Math.floor(remaining / 4));
+          const childDeadline = Math.min(session.deadline, this.now() + share);
           this.startSession({
             threadId: session.threadId,
             dotId: session.dotId,
@@ -616,13 +619,8 @@ export class TaskForceEngine {
 
   /** Top performers of a generation, rebuilt from persistence so a swarm
    *  resumes with its evolution history intact after a restart. */
-  private elitesOf(
-    session: TaskForceSession,
-    generation?: number,
-  ): Elite[] {
-    const gen =
-      generation ??
-      (session.generation > 0 ? session.generation : 0);
+  private elitesOf(session: TaskForceSession, generation?: number): Elite[] {
+    const gen = generation ?? (session.generation > 0 ? session.generation : 0);
     if (gen === 0) return [];
     const workers = this.tf
       .workers(session.id, gen)
@@ -748,7 +746,7 @@ export class TaskForceEngine {
                 .map((s) => s.mission.slice(0, 120))
                 .join('; ')}`
             : '',
-          'Structure: executive summary, then findings by priority, then concrete recommendations (what to do, what to fix, what to add), then open questions. Be specific and cite the swarm\'s findings.',
+          "Structure: executive summary, then findings by priority, then concrete recommendations (what to do, what to fix, what to add), then open questions. Be specific and cite the swarm's findings.",
         ]
           .filter(Boolean)
           .join('\n\n'),
@@ -762,12 +760,17 @@ export class TaskForceEngine {
       const fallback = [
         `# Task force report (raw) — ${session.mission.slice(0, 120)}`,
         ...genSummaries.map((s, i) => `## Generation ${i + 1}\n${s}`),
-        ...elites.map((e) => `## ${e.perspective}\n${e.finding.slice(0, 4000)}`),
+        ...elites.map(
+          (e) => `## ${e.perspective}\n${e.finding.slice(0, 4000)}`,
+        ),
       ].join('\n\n');
       this.tf.updateSession(sessionId, {
         status: 'completed',
         endedAt: this.now(),
-        summary: summarizeText(`Synthesis failed (${message}); raw findings delivered. ${fallback}`, 400),
+        summary: summarizeText(
+          `Synthesis failed (${message}); raw findings delivered. ${fallback}`,
+          400,
+        ),
         error: `Synthesis failed: ${message}`,
       });
       await this.persistReport(sessionId, session, fallback);
@@ -781,7 +784,9 @@ export class TaskForceEngine {
       summary: summarizeText(report, 400),
       content: report,
     });
-    for (const summary of this.tf.memories(sessionId, 'gen_summary').slice(0, 12))
+    for (const summary of this.tf
+      .memories(sessionId, 'gen_summary')
+      .slice(0, 12))
       this.tf.link(reportMemory.id, summary.id, 'synthesizes');
     for (const elite of this.elitesOf(session))
       this.tf.link(reportMemory.id, elite.memoryId, 'synthesizes');
@@ -876,8 +881,7 @@ export class TaskForceEngine {
 
   status(sessionId?: string, threadId?: string): Record<string, unknown> {
     let session = sessionId ? this.tf.session(sessionId) : undefined;
-    if (!session && threadId)
-      session = this.tf.sessionsByThread(threadId)[0];
+    if (!session && threadId) session = this.tf.sessionsByThread(threadId)[0];
     if (!session)
       throw new Error(
         sessionId

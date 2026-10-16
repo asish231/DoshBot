@@ -90,8 +90,7 @@ export async function runLocalTurn(options: {
     state.subscription = source.subscribe({
       next: (event) => {
         if (event?.type === EventType.RUN_ERROR) {
-          const message = (event as unknown as { message?: unknown })
-            .message;
+          const message = (event as unknown as { message?: unknown }).message;
           if (typeof message === 'string' && message) runError = message;
         }
       },

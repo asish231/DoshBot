@@ -1,5 +1,6 @@
 import { PageReviewCard } from './PageReviewCard';
 import { pageReviewSchema, pageReviewTool } from '../shared/page-review';
+import { parseTaskForceSlash } from '../shared/task-force';
 import { AskQuestionCard } from './AskQuestionCard';
 import { askQuestionSchema, askQuestionTool } from '../shared/ask-question';
 import { CompactToolCard, getToolMeta } from './CompactToolCard';
@@ -54,12 +55,7 @@ import {
   type ComputerToolRenderProps,
 } from './ComputerToolCard';
 import { ChatTranscript, isInternalSystemPrompt } from './ChatTranscript';
-import type {
-  Artifact,
-  CallReceipt,
-  Conversation,
-  Dot,
-} from '../shared/types';
+import type { Artifact, CallReceipt, Conversation, Dot } from '../shared/types';
 import ReactMarkdown from 'react-markdown';
 import { Mascot } from './Mascot';
 import { useVoice } from './useVoice';
@@ -233,11 +229,7 @@ function SelectionQuoteMenu({ onQuote }: { onQuote: (text: string) => void }) {
   useEffect(() => {
     const update = () => {
       const selection = window.getSelection();
-      if (
-        !selection ||
-        selection.isCollapsed ||
-        selection.rangeCount === 0
-      ) {
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
         setPos(null);
         return;
       }
@@ -348,9 +340,9 @@ export function Chat({
   // Generative UI: artifacts the Dot creates render in a live side panel.
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
-  const [selectedArtifactId, setSelectedArtifactId] = useState<
-    string | null
-  >(null);
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(
+    null,
+  );
   const knownArtifactIds = useRef<Set<string>>(new Set());
   const refreshArtifacts = () =>
     void api<Artifact[]>(`/artifacts?threadId=${thread.id}`, 'GET')
@@ -423,9 +415,11 @@ export function Chat({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [compactMessage, setCompactMessage] = useState<string | null>(null);
   // The removed tail of the latest revert, held for the Undo affordance.
-  const [undoTail, setUndoTail] = useState<
-    Array<{ id: string; role: string; content: string }> | null
-  >(null);
+  const [undoTail, setUndoTail] = useState<Array<{
+    id: string;
+    role: string;
+    content: string;
+  }> | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   // Whole-window file drop: a depth counter keeps the overlay steady while
@@ -570,7 +564,9 @@ export function Chat({
         { uptoMessageId: messageId },
       );
       if (onForked && forked?.id) {
-        setCompactMessage(`Forked into “${forked.title}” — switching you there.`);
+        setCompactMessage(
+          `Forked into “${forked.title}” — switching you there.`,
+        );
         setTimeout(() => setCompactMessage(null), 3000);
         onForked(forked.id);
       } else {
@@ -701,17 +697,23 @@ export function Chat({
         try {
           runErrorRef.current = null;
           if (attempt > 1) {
-            setError(`Scheduling failed. Retrying (${attempt - 1}/${MAX_RETRIES})…`);
+            setError(
+              `Scheduling failed. Retrying (${attempt - 1}/${MAX_RETRIES})…`,
+            );
             if (agent.messages.length > initialMessageCount) {
               agent.setMessages(agent.messages.slice(0, initialMessageCount));
             }
-            await new Promise((r) => setTimeout(r, Math.min(1000 * Math.pow(1.4, attempt - 2), 4000)));
+            await new Promise((r) =>
+              setTimeout(r, Math.min(1000 * Math.pow(1.4, attempt - 2), 4000)),
+            );
           }
           if (userStoppedRef.current) break;
           const result = await copilotkit.runAgent({ agent });
           if (userStoppedRef.current) break;
           if (runErrorRef.current) throw new Error(runErrorRef.current);
-          if (!result.newMessages.some((message) => message.role === 'assistant'))
+          if (
+            !result.newMessages.some((message) => message.role === 'assistant')
+          )
             throw new Error('The current turn returned no response.');
           setError('');
           onSaved();
@@ -720,7 +722,12 @@ export function Chat({
         } catch (e) {
           lastError = e;
           const msg = e instanceof Error ? e.message : String(e);
-          if (userStoppedRef.current || (e instanceof Error && (e.name === 'AbortError' || /abort|cancel|stop/i.test(msg)))) break;
+          if (
+            userStoppedRef.current ||
+            (e instanceof Error &&
+              (e.name === 'AbortError' || /abort|cancel|stop/i.test(msg)))
+          )
+            break;
           console.warn(`[Chat] Schedule attempt ${attempt} failed:`, e);
           if (attempt <= MAX_RETRIES) continue;
         }
@@ -1145,10 +1152,10 @@ export function Chat({
     const clean = cleanClipboardHtml(html, isTable);
     if (!clean.trim()) return;
     const n = ++pasteCount.current;
-    const name = isTable ? `pasted-table-${n}.html` : `pasted-content-${n}.html`;
-    void handleFilesSelected([
-      new File([clean], name, { type: 'text/html' }),
-    ]);
+    const name = isTable
+      ? `pasted-table-${n}.html`
+      : `pasted-content-${n}.html`;
+    void handleFilesSelected([new File([clean], name, { type: 'text/html' })]);
     // No preventDefault: the plain-text form of the paste still goes into
     // the composer, so the message reads naturally while the structured
     // version is attached above it.
@@ -1406,7 +1413,9 @@ export function Chat({
       const question = trimmed.slice(4).trim();
       setDraft('');
       if (!question) {
-        setError('Add your question after /btw, e.g. /btw what is the deploy command?');
+        setError(
+          'Add your question after /btw, e.g. /btw what is the deploy command?',
+        );
         return;
       }
       void askBtw(question);
@@ -1549,23 +1558,10 @@ export function Chat({
     } else if (trimmed.startsWith('/subagents')) {
       const mission = trimmed.slice(11).trim();
       outgoing = `**Swarm Mode Active**\nMission: ${mission || '(see conversation context)'}\n\nSplit this mission into independent parallel tracks and execute them with ONE run_subagents call (all tracks at once) — the swarm size is your decision: 2-5 tracks for focused work, dozens for broad sweeps with one file or area per track. Give each track a name and pick the right specialist agent profile for it (explore for read-only research, plan for planning, build or general for hands-on work). Then synthesize the merged per-track results into a single final answer with evidence.`;
-    } else if (
-      trimmed === '/tf' ||
-      trimmed.startsWith('/tf ') ||
-      trimmed === '/taskforce' ||
-      trimmed.startsWith('/taskforce ')
-    ) {
-      const rest = trimmed.replace(/^\/(tf|taskforce)\s*/, '').trim();
-      // Optional hours budget as the first token: "/tf 6 audit my app".
-      // Only a plausible budget (0.25-24) followed by a space counts —
-      // "/tf 1984 novel analysis" stays a plain mission.
-      const hoursMatch = rest.match(/^(\d{1,2}(?:\.\d+)?)\s+([\s\S]+)$/);
-      const parsed = hoursMatch ? Number(hoursMatch[1]) : undefined;
-      const hours =
-        parsed !== undefined && parsed >= 0.25 && parsed <= 24
-          ? parsed
-          : undefined;
-      const mission = (hours && hoursMatch ? hoursMatch[2] : rest).trim();
+    } else if (parseTaskForceSlash(trimmed)) {
+      const tfCommand = parseTaskForceSlash(trimmed)!;
+      const { hours } = tfCommand;
+      const mission = tfCommand.mission;
       if (!mission) {
         setDraft('/tf ');
         setError(
@@ -1759,8 +1755,7 @@ export function Chat({
       !isInternalSystemPrompt(message) &&
       ['user', 'assistant'].includes(message.role) &&
       ((typeof message.content === 'string' && message.content.trim()) ||
-        (message.role === 'assistant' &&
-          (message.toolCalls?.length ?? 0) > 0)),
+        (message.role === 'assistant' && (message.toolCalls?.length ?? 0) > 0)),
   );
 
   const latestAssistantMessage = agent.messages.findLast(
@@ -1953,7 +1948,11 @@ export function Chat({
             }
             onClick={() => void toggleFolderTools()}
           >
-            {codingEnabled ? <FolderGit2 size={18} /> : <FolderOpen size={18} />}
+            {codingEnabled ? (
+              <FolderGit2 size={18} />
+            ) : (
+              <FolderOpen size={18} />
+            )}
           </button>
           {onDeleteConversation && (
             <button
@@ -1996,7 +1995,9 @@ export function Chat({
             />
           )}
           onFork={(messageId) => void handleForkFrom(messageId)}
-          onEdit={(messageId, content) => void handleEditMessage(messageId, content)}
+          onEdit={(messageId, content) =>
+            void handleEditMessage(messageId, content)
+          }
           onRevert={(messageId) => void handleRevertTo(messageId)}
         />
         {(liveThinking || finishedThinking) && (
@@ -2023,7 +2024,11 @@ export function Chat({
               </span>
             </button>
             {thinkingOpen && (
-              <pre className="thinking-body" aria-live="polite" ref={thinkingBodyRef}>
+              <pre
+                className="thinking-body"
+                aria-live="polite"
+                ref={thinkingBodyRef}
+              >
                 {liveThinking || finishedThinking}
               </pre>
             )}
@@ -2092,7 +2097,11 @@ export function Chat({
                     }
                     const initialMessageCount = agent.messages.length;
 
-                    for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+                    for (
+                      let attempt = 1;
+                      attempt <= MAX_RETRIES + 1;
+                      attempt++
+                    ) {
                       try {
                         runErrorRef.current = null;
                         if (attempt > 1) {
@@ -2100,7 +2109,9 @@ export function Chat({
                             `Turn encountered an issue. Retrying (${attempt - 1}/${MAX_RETRIES})…`,
                           );
                           if (agent.messages.length > initialMessageCount) {
-                            agent.setMessages(agent.messages.slice(0, initialMessageCount));
+                            agent.setMessages(
+                              agent.messages.slice(0, initialMessageCount),
+                            );
                           }
                           await new Promise((r) =>
                             setTimeout(
@@ -2112,7 +2123,8 @@ export function Chat({
                         if (userStoppedRef.current) break;
                         const result = await copilotkit.runAgent({ agent });
                         if (userStoppedRef.current) break;
-                        if (runErrorRef.current) throw new Error(runErrorRef.current);
+                        if (runErrorRef.current)
+                          throw new Error(runErrorRef.current);
                         if (
                           !result.newMessages.some(
                             (m) => m.role === 'assistant',
@@ -2130,7 +2142,8 @@ export function Chat({
                         if (
                           userStoppedRef.current ||
                           (e instanceof Error &&
-                            (e.name === 'AbortError' || /abort|cancel|stop/i.test(msg)))
+                            (e.name === 'AbortError' ||
+                              /abort|cancel|stop/i.test(msg)))
                         )
                           break;
                         if (attempt <= MAX_RETRIES) continue;
@@ -2251,10 +2264,7 @@ export function Chat({
             )}
           </div>
         )}
-        <div
-          className="chat-composer-box"
-          style={{ position: 'relative' }}
-        >
+        <div className="chat-composer-box" style={{ position: 'relative' }}>
           {slashMenuOpen && (
             <SlashCommandsMenu
               filter={draft}
@@ -2467,14 +2477,14 @@ export function Chat({
                         ? `Coding workspace: ${fullDirPath}. Click to change (Claude / DSH-style local folder).`
                         : 'No folder connected (blank by default). Click to choose one with your OS folder picker, browse, or type a path.'
                       : 'Folder tools are off — click to turn them on.'
-                    }
-                  >
-                    <FolderGit2 size={13} />
-                    <span>
-                      {codingEnabled
-                        ? connectedDir || 'Connect folder'
-                        : 'No folder'}
-                    </span>
+                  }
+                >
+                  <FolderGit2 size={13} />
+                  <span>
+                    {codingEnabled
+                      ? connectedDir || 'Connect folder'
+                      : 'No folder'}
+                  </span>
                   {codingEnabled && dirIsGit && (
                     <span className="dir-git-dot" title="Git repo detected">
                       ●
@@ -3073,7 +3083,11 @@ export function Chat({
                   onClick={() => setSelectedArtifactId(a.id)}
                   title={a.title}
                 >
-                  {a.kind === 'code' ? '⌘' : a.kind === 'markdown' ? '📄' : '📝'}{' '}
+                  {a.kind === 'code'
+                    ? '⌘'
+                    : a.kind === 'markdown'
+                      ? '📄'
+                      : '📝'}{' '}
                   {a.title.length > 18 ? `${a.title.slice(0, 18)}…` : a.title}
                 </button>
               ))}

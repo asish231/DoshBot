@@ -317,10 +317,12 @@ export class DotAgent extends AbstractAgent {
           // Dot knows what exists without carrying the full contents.
           const taskMemorySummaries =
             initialSettings.memoryAllowed && dot.memoryAllowed
-              ? this.workspace.taskMemories(input.threadId).map(
-                  (entry) =>
-                    `${entry.name} (${entry.kind}, ${Math.round(entry.bytes / 1024)}KB): ${entry.summary}`,
-                )
+              ? this.workspace
+                  .taskMemories(input.threadId)
+                  .map(
+                    (entry) =>
+                      `${entry.name} (${entry.kind}, ${Math.round(entry.bytes / 1024)}KB): ${entry.summary}`,
+                  )
               : [];
           // MCP connectors: connect to every enabled server and surface its tools.
           const mcp = await connectMcpConnectors(initialSettings.connectors);
@@ -330,7 +332,10 @@ export class DotAgent extends AbstractAgent {
             const perConnector = mcpSessions
               .map(
                 (session) =>
-                  `${session.connector.name} (${session.tools.length} tools: ${session.tools.map((t) => t.toolName).slice(0, 8).join(', ')}${session.tools.length > 8 ? '…' : ''})`,
+                  `${session.connector.name} (${session.tools.length} tools: ${session.tools
+                    .map((t) => t.toolName)
+                    .slice(0, 8)
+                    .join(', ')}${session.tools.length > 8 ? '…' : ''})`,
               )
               .join('; ');
             mcpInfo = ` MCP CONNECTIONS: ${mcpSessions.length} server(s) connected — ${perConnector}.${mcp.errors.length ? ` Failed connectors: ${mcp.errors.length}.` : ''} Use these mcp_* tools for their capabilities instead of reimplementing them.`;
@@ -447,7 +452,13 @@ export class DotAgent extends AbstractAgent {
                   'Workspace-relative file paths to attach via --file (e.g. ["src/client/Chat.tsx"]). Prefer this over pasting file contents.',
                 ),
             }),
-            execute: async ({ task, agent: profile, model, variant, files }) => {
+            execute: async ({
+              task,
+              agent: profile,
+              model,
+              variant,
+              files,
+            }) => {
               check();
               if (effectivePermissions.bash === 'deny') {
                 throw new Error(
@@ -634,9 +645,9 @@ export class DotAgent extends AbstractAgent {
               // but at most SWARM_CONCURRENCY at a time so a large swarm
               // cannot fork-bomb the host. Order of results is preserved.
               const SWARM_CONCURRENCY = 10;
-              const results = new Array<
-                Awaited<ReturnType<typeof runTrack>>
-              >(agents.length);
+              const results = new Array<Awaited<ReturnType<typeof runTrack>>>(
+                agents.length,
+              );
               let next = 0;
               const workers = Array.from(
                 { length: Math.min(SWARM_CONCURRENCY, agents.length) },
@@ -693,9 +704,7 @@ export class DotAgent extends AbstractAgent {
               taskId: z
                 .string()
                 .optional()
-                .describe(
-                  'Task id (start, pause, and cancel only).',
-                ),
+                .describe('Task id (start, pause, and cancel only).'),
             }),
             execute: async ({
               action,
@@ -742,9 +751,7 @@ export class DotAgent extends AbstractAgent {
                 };
               }
               if (!taskId)
-                throw new Error(
-                  `taskId is required to ${action} a schedule.`,
-                );
+                throw new Error(`taskId is required to ${action} a schedule.`);
               if (action === 'start') {
                 const started = agentStore.action(taskId, 'run');
                 if (!started)
@@ -787,10 +794,14 @@ export class DotAgent extends AbstractAgent {
                 defineTool({
                   name: 'read_skill',
                   description:
-                    'Load a skill\'s full instructions into context. Do this whenever a task matches a skill description — the instructions tell you exactly how the owner wants that kind of work done.',
-                  parameters: z.object({
-                    name: skillNameSchema.describe('Skill name from list_skills.'),
-                  }).strict(),
+                    "Load a skill's full instructions into context. Do this whenever a task matches a skill description — the instructions tell you exactly how the owner wants that kind of work done.",
+                  parameters: z
+                    .object({
+                      name: skillNameSchema.describe(
+                        'Skill name from list_skills.',
+                      ),
+                    })
+                    .strict(),
                   execute: async ({ name }) => {
                     check();
                     const skill = agentStore.skills!.get(name);
@@ -802,21 +813,30 @@ export class DotAgent extends AbstractAgent {
                   name: 'create_skill',
                   description:
                     'Create a skill for the owner: reusable instructions (markdown) the owner and other Dots can load later. Use it on your own initiative whenever you have just done work worth repeating (a workflow, a format, a procedure) — name it after what it does, describe when to use it, and write step-by-step instructions.',
-                  parameters: z.object({
-                    name: skillNameSchema,
-                    description: skillDescriptionSchema,
-                    instructions: skillInstructionsSchema.describe(
-                      'Markdown instructions: when to use the skill and exact steps.',
-                    ),
-                  }).strict(),
+                  parameters: z
+                    .object({
+                      name: skillNameSchema,
+                      description: skillDescriptionSchema,
+                      instructions: skillInstructionsSchema.describe(
+                        'Markdown instructions: when to use the skill and exact steps.',
+                      ),
+                    })
+                    .strict(),
                   execute: async (input) => {
                     check();
                     try {
                       const skill = agentStore.skills!.create(input);
-                      return { created: { name: skill.name, description: skill.description } };
+                      return {
+                        created: {
+                          name: skill.name,
+                          description: skill.description,
+                        },
+                      };
                     } catch (error) {
                       throw new Error(
-                        error instanceof Error ? error.message : 'Could not create skill.',
+                        error instanceof Error
+                          ? error.message
+                          : 'Could not create skill.',
                         { cause: error },
                       );
                     }
@@ -826,13 +846,20 @@ export class DotAgent extends AbstractAgent {
                   name: 'update_skill',
                   description:
                     'Update an existing skill (name, description, or instructions). Keep skills current when you learn a better way to do the work they describe.',
-                  parameters: z.object({
-                    name: skillNameSchema.describe('Skill to update.'),
-                    newName: skillNameSchema.optional(),
-                    description: skillDescriptionSchema.optional(),
-                    instructions: skillInstructionsSchema.optional(),
-                  }).strict(),
-                  execute: async ({ name, newName, description, instructions }) => {
+                  parameters: z
+                    .object({
+                      name: skillNameSchema.describe('Skill to update.'),
+                      newName: skillNameSchema.optional(),
+                      description: skillDescriptionSchema.optional(),
+                      instructions: skillInstructionsSchema.optional(),
+                    })
+                    .strict(),
+                  execute: async ({
+                    name,
+                    newName,
+                    description,
+                    instructions,
+                  }) => {
                     check();
                     try {
                       const skill = agentStore.skills!.update(name, {
@@ -840,10 +867,17 @@ export class DotAgent extends AbstractAgent {
                         ...(description ? { description } : {}),
                         ...(instructions ? { instructions } : {}),
                       });
-                      return { updated: { name: skill.name, description: skill.description } };
+                      return {
+                        updated: {
+                          name: skill.name,
+                          description: skill.description,
+                        },
+                      };
                     } catch (error) {
                       throw new Error(
-                        error instanceof Error ? error.message : 'Could not update skill.',
+                        error instanceof Error
+                          ? error.message
+                          : 'Could not update skill.',
                         { cause: error },
                       );
                     }
@@ -853,9 +887,11 @@ export class DotAgent extends AbstractAgent {
                   name: 'delete_skill',
                   description:
                     'Delete a skill. Only for skills the owner asks to remove or that are obsolete.',
-                  parameters: z.object({
-                    name: skillNameSchema,
-                  }).strict(),
+                  parameters: z
+                    .object({
+                      name: skillNameSchema,
+                    })
+                    .strict(),
                   execute: async ({ name }) => {
                     check();
                     if (!agentStore.skills!.delete(name))
@@ -872,11 +908,13 @@ export class DotAgent extends AbstractAgent {
             defineTool({
               name: 'search_memory',
               description:
-                'Fuzzy-search the owner\'s global memories (typos and partial words still match). Returns scored matches with category and links. Use before assuming you lack context, and to personalize answers from what you know about the owner.',
-              parameters: z.object({
-                query: z.string().trim().min(1).max(500),
-                limit: z.number().int().min(1).max(50).optional(),
-              }).strict(),
+                "Fuzzy-search the owner's global memories (typos and partial words still match). Returns scored matches with category and links. Use before assuming you lack context, and to personalize answers from what you know about the owner.",
+              parameters: z
+                .object({
+                  query: z.string().trim().min(1).max(500),
+                  limit: z.number().int().min(1).max(50).optional(),
+                })
+                .strict(),
               execute: async ({ query, limit }) => {
                 check();
                 const results = agentStore.searchMemories(query, limit ?? 8);
@@ -896,18 +934,22 @@ export class DotAgent extends AbstractAgent {
             defineTool({
               name: 'link_memories',
               description:
-                'Connect two memories in the owner\'s memory graph (e.g. a project to a preference, a fact to a goal) so related knowledge travels together. Use ids from search_memory, save_global_memory results, or the memory graph.',
-              parameters: z.object({
-                fromId: z.string().min(1).max(100),
-                toId: z.string().min(1).max(100),
-                relation: z
-                  .string()
-                  .trim()
-                  .min(1)
-                  .max(80)
-                  .optional()
-                  .describe('How they connect, e.g. "supports", "belongs-to", "contradicts".'),
-              }).strict(),
+                "Connect two memories in the owner's memory graph (e.g. a project to a preference, a fact to a goal) so related knowledge travels together. Use ids from search_memory, save_global_memory results, or the memory graph.",
+              parameters: z
+                .object({
+                  fromId: z.string().min(1).max(100),
+                  toId: z.string().min(1).max(100),
+                  relation: z
+                    .string()
+                    .trim()
+                    .min(1)
+                    .max(80)
+                    .optional()
+                    .describe(
+                      'How they connect, e.g. "supports", "belongs-to", "contradicts".',
+                    ),
+                })
+                .strict(),
               execute: async ({ fromId, toId, relation }) => {
                 check();
                 try {
@@ -915,7 +957,9 @@ export class DotAgent extends AbstractAgent {
                   return { fromId, links };
                 } catch (error) {
                   throw new Error(
-                    error instanceof Error ? error.message : 'Could not link memories.',
+                    error instanceof Error
+                      ? error.message
+                      : 'Could not link memories.',
                     { cause: error },
                   );
                 }
@@ -924,7 +968,7 @@ export class DotAgent extends AbstractAgent {
             defineTool({
               name: 'memory_graph',
               description:
-                'View the owner\'s memory graph: category segments with counts and all interconnection edges. Use to understand the structure of what you know before answering or personalizing.',
+                "View the owner's memory graph: category segments with counts and all interconnection edges. Use to understand the structure of what you know before answering or personalizing.",
               parameters: z.object({}).strict(),
               execute: async () => {
                 check();
@@ -943,19 +987,23 @@ export class DotAgent extends AbstractAgent {
               name: 'spawn_dot',
               description:
                 'Create a new specialist Dot on your own initiative. Give it a clear name and precise role instructions; it becomes a real workspace Dot the owner can see and chat with, and you can delegate work to it with message_dot. Spawn one when a role keeps recurring (a reviewer, a researcher, a data analyst) rather than re-explaining the role each time.',
-              parameters: z.object({
-                name: z.string().trim().min(1).max(40),
-                instructions: z
-                  .string()
-                  .trim()
-                  .min(3)
-                  .max(2000)
-                  .describe('The specialist role instructions for the new Dot.'),
-                model: z.string().trim().max(120).optional(),
-                reasoningEffort: z.string().trim().max(50).optional(),
-                researchAllowed: z.boolean().optional(),
-                memoryAllowed: z.boolean().optional(),
-              }).strict(),
+              parameters: z
+                .object({
+                  name: z.string().trim().min(1).max(40),
+                  instructions: z
+                    .string()
+                    .trim()
+                    .min(3)
+                    .max(2000)
+                    .describe(
+                      'The specialist role instructions for the new Dot.',
+                    ),
+                  model: z.string().trim().max(120).optional(),
+                  reasoningEffort: z.string().trim().max(50).optional(),
+                  researchAllowed: z.boolean().optional(),
+                  memoryAllowed: z.boolean().optional(),
+                })
+                .strict(),
               execute: async (input) => {
                 check();
                 const created = agentWorkspaceRef.createDot(
@@ -998,13 +1046,17 @@ export class DotAgent extends AbstractAgent {
               name: 'message_dot',
               description:
                 'Delegate a task to another Dot: it runs one full turn in its own persistent conversation (with all its tools) and you get its reply. The conversation is kept between calls, so the specialist remembers prior delegations and improves with reuse. Give the message complete context — the specialist does not see this conversation.',
-              parameters: z.object({
-                dotId: z.string().trim().min(1).max(100),
-                message: z.string().trim().min(1).max(16000),
-              }).strict(),
+              parameters: z
+                .object({
+                  dotId: z.string().trim().min(1).max(100),
+                  message: z.string().trim().min(1).max(16000),
+                })
+                .strict(),
               execute: async ({ dotId, message }) => {
                 check();
-                const target = agentWorkspaceRef.dots().find((d) => d.id === dotId);
+                const target = agentWorkspaceRef
+                  .dots()
+                  .find((d) => d.id === dotId);
                 if (!target) throw new Error(`Dot not found: ${dotId}`);
                 if (dotId === dot.id)
                   throw new Error('Cannot delegate to yourself.');
@@ -1025,10 +1077,7 @@ export class DotAgent extends AbstractAgent {
                 // Bounded: a delegated turn gets 5 minutes, then this call
                 // returns an error the caller can act on.
                 const timeout = AbortSignal.timeout(300_000);
-                const combined = AbortSignal.any([
-                  controller.signal,
-                  timeout,
-                ]);
+                const combined = AbortSignal.any([controller.signal, timeout]);
                 check();
                 // The delegated thread runs under its owner's identity.
                 const internalToken = agentConfig.auth?.mintInternalToken(
@@ -1058,45 +1107,47 @@ export class DotAgent extends AbstractAgent {
           const monitorTool = defineTool({
             name: 'manage_monitor',
             description: `Manage event-based site monitors. A monitor watches a URL on an interval and fires a task in this conversation ONLY when the page content changes — use it for "watch this site and tell me when it updates" instead of a blind recurring schedule. Flow: 1) action 'draft' with url, prompt (what to do when it changes), and intervalSeconds creates a PAUSED monitor. 2) ask the owner with ask_question (or plain text) whether to start it. 3) only on approval, action 'start'. Use 'list' to see all monitors with their status and last check; 'pause' stops one; 'cancel' permanently removes one (ask the owner first unless they requested it). The first check establishes a baseline and never fires.`,
-            parameters: z.object({
-              action: z
-                .enum(['draft', 'start', 'list', 'pause', 'cancel'])
-                .describe(
-                  'draft = create paused, start = begin an approved monitor, list = show all, pause = stop checking, cancel = remove permanently.',
-                ),
-              url: z
-                .string()
-                .url()
-                .max(2048)
-                .refine(
-                  (s) =>
-                    ['http:', 'https:'].includes(new URL(s).protocol) &&
-                    !new URL(s).username &&
-                    !new URL(s).password,
-                  'Use a plain http(s) URL.',
-                )
-                .optional()
-                .describe('The URL to watch (draft only).'),
-              prompt: z
-                .string()
-                .min(1)
-                .max(2000)
-                .optional()
-                .describe(
-                  'What to do when the site changes, e.g. "Summarize what changed and save it as a page." (draft only).',
-                ),
-              intervalSeconds: z
-                .number()
-                .int()
-                .min(60)
-                .max(31536000)
-                .optional()
-                .describe('Check interval in seconds (draft only).'),
-              monitorId: z
-                .string()
-                .optional()
-                .describe('Monitor id (start, pause, cancel only).'),
-            }).strict(),
+            parameters: z
+              .object({
+                action: z
+                  .enum(['draft', 'start', 'list', 'pause', 'cancel'])
+                  .describe(
+                    'draft = create paused, start = begin an approved monitor, list = show all, pause = stop checking, cancel = remove permanently.',
+                  ),
+                url: z
+                  .string()
+                  .url()
+                  .max(2048)
+                  .refine(
+                    (s) =>
+                      ['http:', 'https:'].includes(new URL(s).protocol) &&
+                      !new URL(s).username &&
+                      !new URL(s).password,
+                    'Use a plain http(s) URL.',
+                  )
+                  .optional()
+                  .describe('The URL to watch (draft only).'),
+                prompt: z
+                  .string()
+                  .min(1)
+                  .max(2000)
+                  .optional()
+                  .describe(
+                    'What to do when the site changes, e.g. "Summarize what changed and save it as a page." (draft only).',
+                  ),
+                intervalSeconds: z
+                  .number()
+                  .int()
+                  .min(60)
+                  .max(31536000)
+                  .optional()
+                  .describe('Check interval in seconds (draft only).'),
+                monitorId: z
+                  .string()
+                  .optional()
+                  .describe('Monitor id (start, pause, cancel only).'),
+              })
+              .strict(),
             execute: async ({
               action,
               url,
@@ -1138,7 +1189,9 @@ export class DotAgent extends AbstractAgent {
                 };
               }
               if (!monitorId)
-                throw new Error(`monitorId is required to ${action} a monitor.`);
+                throw new Error(
+                  `monitorId is required to ${action} a monitor.`,
+                );
               if (action === 'cancel') {
                 if (!agentStore.deleteMonitor(monitorId))
                   throw new Error(`Monitor not found: ${monitorId}`);
@@ -1166,22 +1219,26 @@ export class DotAgent extends AbstractAgent {
           const artifactTool = defineTool({
             name: 'create_artifact',
             description:
-              'Create a document or code panel that renders live in the owner\'s chat artifact panel — visible immediately, no folder required. Use it whenever you produce a deliverable the owner should read or keep: reports, notes, specs (markdown), scripts and code files (code with a language), or plain text. For one-off explanations a normal reply is fine; use artifacts for things worth keeping.',
-            parameters: z.object({
-              title: z.string().trim().min(1).max(200),
-              kind: z
-                .enum(['markdown', 'code', 'text'])
-                .describe(
-                  'markdown = rendered doc/report, code = code file (set language), text = plain text.',
-                ),
-              language: z
-                .string()
-                .trim()
-                .max(60)
-                .optional()
-                .describe('Language for code artifacts, e.g. python, typescript.'),
-              content: z.string().min(1).max(200_000),
-            }).strict(),
+              "Create a document or code panel that renders live in the owner's chat artifact panel — visible immediately, no folder required. Use it whenever you produce a deliverable the owner should read or keep: reports, notes, specs (markdown), scripts and code files (code with a language), or plain text. For one-off explanations a normal reply is fine; use artifacts for things worth keeping.",
+            parameters: z
+              .object({
+                title: z.string().trim().min(1).max(200),
+                kind: z
+                  .enum(['markdown', 'code', 'text'])
+                  .describe(
+                    'markdown = rendered doc/report, code = code file (set language), text = plain text.',
+                  ),
+                language: z
+                  .string()
+                  .trim()
+                  .max(60)
+                  .optional()
+                  .describe(
+                    'Language for code artifacts, e.g. python, typescript.',
+                  ),
+                content: z.string().min(1).max(200_000),
+              })
+              .strict(),
             execute: async ({ title, kind, language, content }) => {
               check();
               const saved = agentStore.saveArtifact(
@@ -1195,7 +1252,7 @@ export class DotAgent extends AbstractAgent {
               return {
                 artifactId: saved.id,
                 title: saved.title,
-                note: 'The artifact panel opened in the owner\'s chat with this content.',
+                note: "The artifact panel opened in the owner's chat with this content.",
               };
             },
           });
@@ -1208,22 +1265,28 @@ export class DotAgent extends AbstractAgent {
             defineTool({
               name: 'save_task_memory',
               description:
-                'Save a working-data entry in this conversation\'s task memory — the place for long context material. Give it a short name, a SMALL summary (what this holds, 1-2 lines — this is what you see in context), and the FULL content (e.g. a PDF converted to raw markdown, a table extracted from an image, a whole file). Saving with an existing name replaces that entry instead of duplicating it. Use one entry per source file or per topic so you can retrieve exactly what you need later.',
-              parameters: z.object({
-                name: z.string().trim().min(1).max(200),
-                summary: z.string().trim().min(1).max(500),
-                content: z.string().min(1).max(400_000),
-                kind: z
-                  .enum(['file', 'image', 'note'])
-                  .optional()
-                  .describe('file = extracted document/file, image = image-derived data, note = working note.'),
-                source: z
-                  .string()
-                  .trim()
-                  .max(300)
-                  .optional()
-                  .describe('Where it came from, e.g. "report.pdf" or an upload id.'),
-              }).strict(),
+                "Save a working-data entry in this conversation's task memory — the place for long context material. Give it a short name, a SMALL summary (what this holds, 1-2 lines — this is what you see in context), and the FULL content (e.g. a PDF converted to raw markdown, a table extracted from an image, a whole file). Saving with an existing name replaces that entry instead of duplicating it. Use one entry per source file or per topic so you can retrieve exactly what you need later.",
+              parameters: z
+                .object({
+                  name: z.string().trim().min(1).max(200),
+                  summary: z.string().trim().min(1).max(500),
+                  content: z.string().min(1).max(400_000),
+                  kind: z
+                    .enum(['file', 'image', 'note'])
+                    .optional()
+                    .describe(
+                      'file = extracted document/file, image = image-derived data, note = working note.',
+                    ),
+                  source: z
+                    .string()
+                    .trim()
+                    .max(300)
+                    .optional()
+                    .describe(
+                      'Where it came from, e.g. "report.pdf" or an upload id.',
+                    ),
+                })
+                .strict(),
               execute: async ({ name, summary, content, kind, source }) => {
                 check();
                 const saved = agentWorkspace.saveTaskMemory(
@@ -1245,16 +1308,20 @@ export class DotAgent extends AbstractAgent {
               name: 'append_task_memory',
               description:
                 'Append content to an existing task memory entry by name — use it when more data arrives for a source you already captured (more pages, another batch of rows, a later section).',
-              parameters: z.object({
-                name: z.string().trim().min(1).max(200),
-                content: z.string().min(1).max(400_000),
-                summary: z
-                  .string()
-                  .trim()
-                  .max(500)
-                  .optional()
-                  .describe('Optional replacement summary if the scope grew.'),
-              }).strict(),
+              parameters: z
+                .object({
+                  name: z.string().trim().min(1).max(200),
+                  content: z.string().min(1).max(400_000),
+                  summary: z
+                    .string()
+                    .trim()
+                    .max(500)
+                    .optional()
+                    .describe(
+                      'Optional replacement summary if the scope grew.',
+                    ),
+                })
+                .strict(),
               execute: async ({ name, content, summary }) => {
                 check();
                 const entry = agentWorkspace.appendTaskMemory(
@@ -1263,27 +1330,34 @@ export class DotAgent extends AbstractAgent {
                   content,
                   summary,
                 );
-                if (!entry) throw new Error(`No task memory entry named "${name}" in this conversation.`);
+                if (!entry)
+                  throw new Error(
+                    `No task memory entry named "${name}" in this conversation.`,
+                  );
                 check();
-                return { entry: { id: entry.id, name: entry.name, bytes: entry.bytes } };
+                return {
+                  entry: { id: entry.id, name: entry.name, bytes: entry.bytes },
+                };
               },
             }),
             defineTool({
               name: 'list_task_memory',
               description:
-                'List this conversation\'s task memory entries (name, summary, size) — your working set without the full contents.',
+                "List this conversation's task memory entries (name, summary, size) — your working set without the full contents.",
               parameters: z.object({}).strict(),
               execute: async () => {
                 check();
                 return {
-                  entries: agentWorkspace.taskMemories(input.threadId).map((e) => ({
-                    id: e.id,
-                    name: e.name,
-                    summary: e.summary,
-                    kind: e.kind,
-                    bytes: e.bytes,
-                    updatedAt: e.updatedAt,
-                  })),
+                  entries: agentWorkspace
+                    .taskMemories(input.threadId)
+                    .map((e) => ({
+                      id: e.id,
+                      name: e.name,
+                      summary: e.summary,
+                      kind: e.kind,
+                      bytes: e.bytes,
+                      updatedAt: e.updatedAt,
+                    })),
                 };
               },
             }),
@@ -1291,10 +1365,12 @@ export class DotAgent extends AbstractAgent {
               name: 'read_task_memory',
               description:
                 'Read the FULL content of one task memory entry by id or name — the extracted file, table, or image data. Use it only for the entries the current step actually needs; the summary list tells you what exists.',
-              parameters: z.object({
-                id: z.string().trim().max(100).optional(),
-                name: z.string().trim().max(200).optional(),
-              }).strict(),
+              parameters: z
+                .object({
+                  id: z.string().trim().max(100).optional(),
+                  name: z.string().trim().max(200).optional(),
+                })
+                .strict(),
               execute: async ({ id, name }) => {
                 check();
                 const entry = id
@@ -1317,11 +1393,13 @@ export class DotAgent extends AbstractAgent {
             defineTool({
               name: 'search_task_memory',
               description:
-                'Fuzzy-search this conversation\'s task memory across names, summaries, and full contents — partial words still match. Returns scored entries.',
-              parameters: z.object({
-                query: z.string().trim().min(1).max(500),
-                limit: z.number().int().min(1).max(50).optional(),
-              }).strict(),
+                "Fuzzy-search this conversation's task memory across names, summaries, and full contents — partial words still match. Returns scored entries.",
+              parameters: z
+                .object({
+                  query: z.string().trim().min(1).max(500),
+                  limit: z.number().int().min(1).max(50).optional(),
+                })
+                .strict(),
               execute: async ({ query, limit }) => {
                 check();
                 const results = agentWorkspace.searchTaskMemory(
@@ -1346,14 +1424,16 @@ export class DotAgent extends AbstractAgent {
               name: 'clear_task_memory',
               description:
                 'Flush task memory — YOUR call when working data is no longer needed. Flush a single entry by id, or all of it at once when the task is done or the data is stale. Before flushing insights worth keeping, save them to session memory (save_session_memory) or global memory first. Raw working data (whole files, extracted pages) should NOT linger: keep the working set lean.',
-              parameters: z.object({
-                id: z
-                  .string()
-                  .trim()
-                  .max(100)
-                  .optional()
-                  .describe('Flush one entry; omit to flush all.'),
-              }).strict(),
+              parameters: z
+                .object({
+                  id: z
+                    .string()
+                    .trim()
+                    .max(100)
+                    .optional()
+                    .describe('Flush one entry; omit to flush all.'),
+                })
+                .strict(),
               execute: async ({ id }) => {
                 check();
                 if (id) {
@@ -1393,22 +1473,27 @@ export class DotAgent extends AbstractAgent {
                   defineTool({
                     name: 'push_upload_to_computer',
                     description:
-                      'Copy an uploaded file into your computer\'s workspace (binary-safe). Then process it there: files_list/files_read for text, exec for anything (image tools, scripts, analysis).',
-                    parameters: z.object({
-                      uploadId: z.string().trim().min(1).max(100),
-                      path: z
-                        .string()
-                        .min(1)
-                        .max(400)
-                        .describe(
-                          'Workspace-relative destination path, e.g. "data/photo.jpg".',
-                        ),
-                    }).strict(),
+                      "Copy an uploaded file into your computer's workspace (binary-safe). Then process it there: files_list/files_read for text, exec for anything (image tools, scripts, analysis).",
+                    parameters: z
+                      .object({
+                        uploadId: z.string().trim().min(1).max(100),
+                        path: z
+                          .string()
+                          .min(1)
+                          .max(400)
+                          .describe(
+                            'Workspace-relative destination path, e.g. "data/photo.jpg".',
+                          ),
+                      })
+                      .strict(),
                     execute: async ({ uploadId, path }) => {
                       check();
                       const upload = teamStore.upload(uploadId);
-                      if (!upload) throw new Error(`Upload not found: ${uploadId}`);
-                      const bytes = await readFile(teamStore.uploadPath(upload.id));
+                      if (!upload)
+                        throw new Error(`Upload not found: ${uploadId}`);
+                      const bytes = await readFile(
+                        teamStore.uploadPath(upload.id),
+                      );
                       const result = await computer.action(
                         dot.id,
                         'files_write',
@@ -1436,7 +1521,7 @@ export class DotAgent extends AbstractAgent {
             defineTool({
               name: 'task_force',
               description:
-                'Launch a LONG-HORIZON research task force: a hybrid genetic swarm + recursive sub-agent tree. The swarm evolves generations of parallel specialist workers for hours (you set the budget; server cap typically 6-24h), and ANY worker can spawn its own deep-dive sub-swarm, whose workers can spawn deeper ones (recursive, to depth 6) — all running concurrently, with sub-agent results feeding back into the swarm\'s evolution. Use it — on your own initiative or when the owner asks — for missions too deep for inline work: full UX/UI audits of an app (map every screen, find what is missing, define the ideal UI), market research, competitive landscapes, deep code/product analysis. Every worker keeps cross-linked memory; the final report lands in this conversation as an artifact. UNLIMITED USE, no token budget is charged.',
+                "Launch a LONG-HORIZON research task force: a hybrid genetic swarm + recursive sub-agent tree. The swarm evolves generations of parallel specialist workers for hours (you set the budget; server cap typically 6-24h), and ANY worker can spawn its own deep-dive sub-swarm, whose workers can spawn deeper ones (recursive, to depth 6) — all running concurrently, with sub-agent results feeding back into the swarm's evolution. Use it — on your own initiative or when the owner asks — for missions too deep for inline work: full UX/UI audits of an app (map every screen, find what is missing, define the ideal UI), market research, competitive landscapes, deep code/product analysis. Every worker keeps cross-linked memory; the final report lands in this conversation as an artifact. UNLIMITED USE, no token budget is charged.",
               parameters: z
                 .object({
                   mission: z

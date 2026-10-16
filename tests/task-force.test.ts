@@ -14,6 +14,7 @@ import {
   summarizeText,
   tokenize,
 } from '../src/server/task-force.js';
+import { parseTaskForceSlash } from '../src/shared/task-force.js';
 
 const resources: (() => void)[] = [];
 afterEach(() => {
@@ -30,14 +31,11 @@ function fixture(options?: {
     store.close();
     tf.close();
   });
-  if (options?.settings)
-    store.updateSettings(options.settings as never);
+  if (options?.settings) store.updateSettings(options.settings as never);
   const saveArtifact = vi.fn(async (artifact: { title: string }) => ({
     id: `artifact-${artifact.title.slice(0, 8)}`,
   }));
-  const notify = vi.fn(
-    async (_threadId: string, _message: string) => {},
-  );
+  const notify = vi.fn(async (_threadId: string, _message: string) => {});
   const callLog: string[] = [];
   const transport = vi.fn<typeof fetch>(async (_url, init) => {
     const body = JSON.parse(String(init?.body)) as {
@@ -45,7 +43,8 @@ function fixture(options?: {
     };
     const prompt = body.messages[0]!.content;
     callLog.push(prompt);
-    const content = options?.reply?.(prompt) ?? 'Generic finding about the mission.';
+    const content =
+      options?.reply?.(prompt) ?? 'Generic finding about the mission.';
     return new Response(
       JSON.stringify({ choices: [{ message: { content } }] }),
       { status: 200 },
@@ -96,9 +95,30 @@ describe('pure building blocks', () => {
   it('selects only positive-fitness elites, best first', () => {
     const elites = selectElites(
       [
-        { workerId: 'a', memoryId: 'ma', finding: 'f', summary: 's', fitness: 0.2, perspective: 'p' },
-        { workerId: 'b', memoryId: 'mb', finding: 'f', summary: 's', fitness: 0.9, perspective: 'p' },
-        { workerId: 'c', memoryId: 'mc', finding: 'f', summary: 's', fitness: 0, perspective: 'p' },
+        {
+          workerId: 'a',
+          memoryId: 'ma',
+          finding: 'f',
+          summary: 's',
+          fitness: 0.2,
+          perspective: 'p',
+        },
+        {
+          workerId: 'b',
+          memoryId: 'mb',
+          finding: 'f',
+          summary: 's',
+          fitness: 0.9,
+          perspective: 'p',
+        },
+        {
+          workerId: 'c',
+          memoryId: 'mc',
+          finding: 'f',
+          summary: 's',
+          fitness: 0,
+          perspective: 'p',
+        },
       ],
       2,
     );
@@ -136,7 +156,8 @@ describe('pure building blocks', () => {
   it('builds worker prompts with evolution context and the output contract', () => {
     const prompt = buildWorkerPrompt({
       mission: 'Map the ideal UI',
-      perspective: 'skeptic (challenge the current direction: what is wrong or risky here?)',
+      perspective:
+        'skeptic (challenge the current direction: what is wrong or risky here?)',
       generation: 2,
       eliteSummaries: ['Gen 1 found the nav is buried'],
       ownMemories: [],
@@ -191,9 +212,50 @@ describe('TaskForceStore', () => {
     expect(tf.memoryByWorker(worker.id)!.id).toBe(memory.id);
     expect(tf.workerCount(session.id)).toBe(1);
     expect(tf.updateSession(session.id, { generation: 1 })!.generation).toBe(1);
+    expect(tf.searchMemories(['onboarding']).map((m) => m.id)).toContain(
+      memory.id,
+    );
+  });
+});
+
+describe('parseTaskForceSlash', () => {
+  it('parses a plain mission with no hours budget', () => {
+    expect(parseTaskForceSlash('/tf audit my app onboarding UX')).toEqual({
+      hours: undefined,
+      mission: 'audit my app onboarding UX',
+    });
+  });
+
+  it('parses an explicit hours budget and accepts the alias', () => {
     expect(
-      tf.searchMemories(['onboarding']).map((m) => m.id),
-    ).toContain(memory.id);
+      parseTaskForceSlash('/tf 6 full UX/UI audit of the dashboard'),
+    ).toEqual({ hours: 6, mission: 'full UX/UI audit of the dashboard' });
+    expect(parseTaskForceSlash('/taskforce 0.5 quick market scan')).toEqual({
+      hours: 0.5,
+      mission: 'quick market scan',
+    });
+    expect(
+      parseTaskForceSlash('/taskforce 24 exhaustive competitive landscape'),
+    ).toEqual({ hours: 24, mission: 'exhaustive competitive landscape' });
+  });
+
+  it('keeps out-of-range leading numbers as mission text', () => {
+    expect(parseTaskForceSlash('/tf 1984 novel analysis')).toEqual({
+      hours: undefined,
+      mission: '1984 novel analysis',
+    });
+    expect(parseTaskForceSlash('/tf 0 tiny mission')).toEqual({
+      hours: undefined,
+      mission: '0 tiny mission',
+    });
+  });
+
+  it('returns an empty mission for the bare command and null otherwise', () => {
+    expect(parseTaskForceSlash('/tf')).toEqual({ mission: '' });
+    expect(parseTaskForceSlash('/taskforce')).toEqual({ mission: '' });
+    expect(parseTaskForceSlash('/tfx not a command')).toBeNull();
+    expect(parseTaskForceSlash('hello /tf embedded')).toBeNull();
+    expect(parseTaskForceSlash('/goal other mode')).toBeNull();
   });
 });
 
@@ -220,7 +282,11 @@ describe('TaskForceEngine', () => {
     });
     expect(session.status).toBe('running');
     // Convergence needs 3 generations: drive until the session settles.
-    for (let i = 0; i < 10 && tf.session(session.id)!.status === 'running'; i++) {
+    for (
+      let i = 0;
+      i < 10 && tf.session(session.id)!.status === 'running';
+      i++
+    ) {
       await engine.drive();
     }
     const done = tf.session(session.id)!;
@@ -229,7 +295,9 @@ describe('TaskForceEngine', () => {
     expect(tf.workerCount(session.id)).toBeGreaterThanOrEqual(6);
     // Memory graph: findings + per-generation summaries + the final report.
     expect(tf.memories(session.id, 'finding').length).toBeGreaterThanOrEqual(6);
-    expect(tf.memories(session.id, 'gen_summary').length).toBeGreaterThanOrEqual(3);
+    expect(
+      tf.memories(session.id, 'gen_summary').length,
+    ).toBeGreaterThanOrEqual(3);
     expect(tf.memories(session.id, 'report').length).toBe(1);
     expect(done.summary).toBeTruthy();
     expect(saveArtifact).toHaveBeenCalledOnce();
@@ -258,9 +326,9 @@ describe('TaskForceEngine', () => {
     for (let i = 0; i < 10; i++) {
       await engine.drive();
       if (
-        tf.sessions().every(
-          (s) => s.status !== 'running' || s.deadline <= Date.now(),
-        )
+        tf
+          .sessions()
+          .every((s) => s.status !== 'running' || s.deadline <= Date.now())
       )
         break;
     }
@@ -288,7 +356,9 @@ describe('TaskForceEngine', () => {
       hours: 30,
     });
     expect(session.hoursBudget).toBe(6);
-    expect(session.deadline).toBeLessThanOrEqual(Date.now() + 6 * 3_600_000 + 5);
+    expect(session.deadline).toBeLessThanOrEqual(
+      Date.now() + 6 * 3_600_000 + 5,
+    );
   });
 
   it('pauses, resumes with a fresh window, and cancels', async () => {
@@ -341,7 +411,8 @@ describe('TaskForceEngine', () => {
 
   it('status reports progress and recall walks the neural link network', async () => {
     const { engine } = fixture({
-      reply: () => '## Onboarding audit\n- Missing verification step in onboarding',
+      reply: () =>
+        '## Onboarding audit\n- Missing verification step in onboarding',
     });
     const session = engine.startSession({
       threadId: 'thread',
@@ -371,9 +442,7 @@ describe('TaskForceEngine', () => {
     };
     expect(deep.memory.content).toContain('onboarding');
     // The finding links to its generation summary (compaction layer).
-    expect(
-      deep.neighbors.some((n) => n.relation === 'summarizes'),
-    ).toBe(true);
+    expect(deep.neighbors.some((n) => n.relation === 'summarizes')).toBe(true);
   });
 
   it('runs multiple sessions concurrently in a single drive pass', async () => {
@@ -475,7 +544,9 @@ describe('TaskForceEngine', () => {
       p.includes('DEEP-DIVE SUB-AGENT RESULTS'),
     );
     expect(withFeedback).toBeTruthy();
-    expect(withFeedback).toContain('pricing deep dive found 3 competitor tiers');
+    expect(withFeedback).toContain(
+      'pricing deep dive found 3 competitor tiers',
+    );
   });
 
   it('resumes interrupted sessions after a restart', async () => {
@@ -508,10 +579,7 @@ describe('TaskForceEngine', () => {
 });
 
 /** startSession without an engine instance helper: uses a temporary engine. */
-function enginelessStart(
-  store: Store,
-  tf: TaskForceStore,
-) {
+function enginelessStart(store: Store, tf: TaskForceStore) {
   const engine = new TaskForceEngine(store, tf, {
     model: { baseUrl: 'https://m.test/v1', apiKey: 'k', model: 'm' },
     configOverrides: { waveSize: 1, maxWave: 1, maxDepth: 0 },

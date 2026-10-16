@@ -45,7 +45,8 @@ export function parseTaskForceConfig(
 export class TaskForceStore {
   private db: DatabaseSync;
   constructor(database: string) {
-    if (database !== ':memory:') mkdirSync(dirname(database), { recursive: true });
+    if (database !== ':memory:')
+      mkdirSync(dirname(database), { recursive: true });
     this.db = new DatabaseSync(database);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS tf_sessions (
@@ -147,20 +148,22 @@ export class TaskForceStore {
   }
 
   sessions(status?: TaskForceSessionStatus): TaskForceSession[] {
-    return (
-      status
-        ? this.db
-            .prepare('SELECT * FROM tf_sessions WHERE status=? ORDER BY createdAt')
-            .all(status)
-        : this.db
-            .prepare('SELECT * FROM tf_sessions ORDER BY createdAt DESC')
-            .all()
-    ) as unknown as TaskForceSession[];
+    return (status
+      ? this.db
+          .prepare(
+            'SELECT * FROM tf_sessions WHERE status=? ORDER BY createdAt',
+          )
+          .all(status)
+      : this.db
+          .prepare('SELECT * FROM tf_sessions ORDER BY createdAt DESC')
+          .all()) as unknown as TaskForceSession[];
   }
 
   sessionsByThread(threadId: string): TaskForceSession[] {
     return this.db
-      .prepare('SELECT * FROM tf_sessions WHERE threadId=? ORDER BY createdAt DESC')
+      .prepare(
+        'SELECT * FROM tf_sessions WHERE threadId=? ORDER BY createdAt DESC',
+      )
       .all(threadId) as unknown as TaskForceSession[];
   }
 
@@ -235,19 +238,17 @@ export class TaskForceStore {
   }
 
   workers(sessionId: string, generation?: number): TaskForceWorker[] {
-    return (
-      generation !== undefined
-        ? this.db
-            .prepare(
-              'SELECT * FROM tf_workers WHERE sessionId=? AND generation=? ORDER BY createdAt',
-            )
-            .all(sessionId, generation)
-        : this.db
-            .prepare(
-              'SELECT * FROM tf_workers WHERE sessionId=? ORDER BY createdAt',
-            )
-            .all(sessionId)
-    ) as unknown as TaskForceWorker[];
+    return (generation !== undefined
+      ? this.db
+          .prepare(
+            'SELECT * FROM tf_workers WHERE sessionId=? AND generation=? ORDER BY createdAt',
+          )
+          .all(sessionId, generation)
+      : this.db
+          .prepare(
+            'SELECT * FROM tf_workers WHERE sessionId=? ORDER BY createdAt',
+          )
+          .all(sessionId)) as unknown as TaskForceWorker[];
   }
 
   workerCount(sessionId: string): number {
@@ -260,9 +261,7 @@ export class TaskForceStore {
 
   finishWorker(
     id: string,
-    outcome:
-      | { finding: string; fitness: number }
-      | { error: string },
+    outcome: { finding: string; fitness: number } | { error: string },
   ): void {
     if ('error' in outcome) {
       this.db
@@ -323,10 +322,7 @@ export class TaskForceStore {
       .get(workerId) as unknown as TaskForceMemory | undefined;
   }
 
-  memories(
-    sessionId?: string,
-    kind?: TaskForceMemoryKind,
-  ): TaskForceMemory[] {
+  memories(sessionId?: string, kind?: TaskForceMemoryKind): TaskForceMemory[] {
     const clauses: string[] = [];
     const params: (string | number)[] = [];
     if (sessionId) {

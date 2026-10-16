@@ -66,7 +66,10 @@ export function ChatTranscript({
     try {
       await navigator.clipboard.writeText(text);
       setCopiedId(message.id);
-      setTimeout(() => setCopiedId((id) => (id === message.id ? null : id)), 1800);
+      setTimeout(
+        () => setCopiedId((id) => (id === message.id ? null : id)),
+        1800,
+      );
     } catch {
       /* clipboard unavailable (permissions/insecure context) */
     }
@@ -106,7 +109,10 @@ export function ChatTranscript({
         const text = typeof message.content === 'string' ? message.content : '';
         if (editingId === message.id) {
           return (
-            <div key={message.id} className={`chat-bubble ${message.role} editing`}>
+            <div
+              key={message.id}
+              className={`chat-bubble ${message.role} editing`}
+            >
               <textarea
                 className="chat-edit-input"
                 value={editDraft}
@@ -133,11 +139,16 @@ export function ChatTranscript({
                 >
                   Save &amp; resend
                 </button>
-                <button type="button" className="chat-edit-cancel" onClick={cancelEdit}>
+                <button
+                  type="button"
+                  className="chat-edit-cancel"
+                  onClick={cancelEdit}
+                >
                   Cancel
                 </button>
                 <small className="chat-edit-hint">
-                  Turns after this message will be removed — fork first to keep them.
+                  Turns after this message will be removed — fork first to keep
+                  them.
                 </small>
               </div>
             </div>

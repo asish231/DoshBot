@@ -79,7 +79,8 @@ See [Setup](docs/SETUP.md) for models, Parallel search, browser service, voice, 
 | Tokens          | Per-session `↑in ↓out (%)`, model context windows (Gemini 2M, Claude/Kimi 200k, DeepSeek/GPT 128k), click-to-compact                                          |
 | Memory          | Global + per-session SQLite tables, categories, `/memory`, session isolation + cascade delete                                                                 |
 | Context cache   | `local_thread_runs` persistence, `/compact` checkpoint, `/clear` reset, research `captures`                                                                   |
-| Execution modes | `/goal` autonomous, `/code` repo work, `/plan` milestones, `/init` AGENTS.md, `/review` + `/undo` safe edits, `/search` + `/browse` research                     |
+| Execution modes | `/goal` autonomous, `/code` repo work, `/plan` milestones, `/init` AGENTS.md, `/review` + `/undo` safe edits, `/search` + `/browse` research, `/tf` long-horizon task force             |
+| Task force      | Long-horizon research swarm: genetic generations, workers spawn recursive deep-dive sub-swarms (depth 6), per-agent cross-linked memory, `/tf` command, report filed as a chat artifact |
 | Human-in-loop   | `ask_question` cards, page review Approve & save, `ask` coding permission blocks writes until the owner flips to auto                                         |
 | Scheduling      | Recurring server tasks, pause/resume, run history, receipts in-thread                                                                                         |
 | Budgets         | Per-Dot monthly token budget with hard stop, usage readout, owner reset (`usage_events` table)                                                                |
@@ -119,6 +120,8 @@ Key files:
 - `src/server/mcp-connectors.ts` — real MCP connector runtime (stdio/SSE/streamable HTTP)
 - `src/server/settings-redaction.ts` — credential redaction for API responses
 - `src/server/opencode.ts` — binary discovery, free-model listing, `runOpenCode()`
+- `src/server/task-force.ts` — long-horizon research swarm engine: genetic generations, recursive sub-agent tree, memory graph, `/tf` tool surface
+- `src/server/task-force-store.ts` — `tf_sessions` / `tf_workers` / `tf_memories` / `tf_links` SQLite persistence (WAL, restart-safe)
 - `src/server/store.ts` — global `memories`, tasks/schedules
 - `src/server/workspace.ts` — spaces/dots/threads/runs/session memories/compact/clear/budgets/usage
 - `src/server/workspace-routes.ts` — `/models`, `/opencode/*`, `/workspace/directory`, `/conversations/*`, `/dots/:id/usage`

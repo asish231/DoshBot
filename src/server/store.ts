@@ -151,15 +151,15 @@ export class Store {
     });
   }
   tasks(ownerId?: string): Task[] {
-    return (
-      ownerId
-        ? this.db
-            .prepare('SELECT * FROM tasks WHERE ownerId=? ORDER BY createdAt DESC')
-            .all(ownerId)
-        : this.db
-            .prepare('SELECT * FROM tasks ORDER BY createdAt DESC')
-            .all()
-    ) as unknown as Task[];
+    return (ownerId
+      ? this.db
+          .prepare(
+            'SELECT * FROM tasks WHERE ownerId=? ORDER BY createdAt DESC',
+          )
+          .all(ownerId)
+      : this.db
+          .prepare('SELECT * FROM tasks ORDER BY createdAt DESC')
+          .all()) as unknown as Task[];
   }
   task(id: string): Task | undefined {
     return this.db
@@ -434,7 +434,9 @@ export class Store {
   }
   memoryLinks(id: string): Array<{ toId: string; relation: string }> {
     return this.db
-      .prepare('SELECT toId, relation FROM memory_links WHERE fromId=? ORDER BY createdAt')
+      .prepare(
+        'SELECT toId, relation FROM memory_links WHERE fromId=? ORDER BY createdAt',
+      )
       .all(id) as Array<{ toId: string; relation: string }>;
   }
   /** Graph view: category segments with their memories and all edges. */
@@ -445,28 +447,29 @@ export class Store {
   } {
     // Oldest-first: segments appear in the order memories were created,
     // independent of same-millisecond timestamp ties.
-    const memories = (
-      ownerId
-        ? this.db
-            .prepare(
-              'SELECT * FROM memories WHERE ownerId=? ORDER BY createdAt ASC, rowid ASC',
-            )
-            .all(ownerId)
-        : this.db
-            .prepare(
-              'SELECT * FROM memories ORDER BY createdAt ASC, rowid ASC',
-            )
-            .all()
-    ) as unknown as Memory[];
+    const memories = (ownerId
+      ? this.db
+          .prepare(
+            'SELECT * FROM memories WHERE ownerId=? ORDER BY createdAt ASC, rowid ASC',
+          )
+          .all(ownerId)
+      : this.db
+          .prepare('SELECT * FROM memories ORDER BY createdAt ASC, rowid ASC')
+          .all()) as unknown as Memory[];
     const byCategory = new Map<string, string[]>();
     for (const memory of memories) {
       const category = memory.category || 'general';
-      byCategory.set(category, [...(byCategory.get(category) ?? []), memory.id]);
+      byCategory.set(category, [
+        ...(byCategory.get(category) ?? []),
+        memory.id,
+      ]);
     }
     const visible = new Set(memories.map((memory) => memory.id));
     const edges = (
       this.db
-        .prepare('SELECT fromId, toId, relation FROM memory_links ORDER BY createdAt')
+        .prepare(
+          'SELECT fromId, toId, relation FROM memory_links ORDER BY createdAt',
+        )
         .all() as Array<{ fromId: string; toId: string; relation: string }>
     ).filter((edge) => visible.has(edge.fromId) && visible.has(edge.toId));
     return {
@@ -570,9 +573,7 @@ export class Store {
   }
   monitorAction(id: string, action: 'start' | 'pause'): Monitor | undefined {
     this.db
-      .prepare(
-        "UPDATE monitors SET status=?, updatedAt=? WHERE id=?",
-      )
+      .prepare('UPDATE monitors SET status=?, updatedAt=? WHERE id=?')
       .run(action === 'start' ? 'active' : 'paused', Date.now(), id);
     return this.monitor(id);
   }
@@ -588,7 +589,9 @@ export class Store {
       .run(hash, Date.now(), error, Date.now(), id);
   }
   deleteMonitor(id: string): boolean {
-    return this.db.prepare('DELETE FROM monitors WHERE id=?').run(id).changes > 0;
+    return (
+      this.db.prepare('DELETE FROM monitors WHERE id=?').run(id).changes > 0
+    );
   }
   /** In-chat artifacts: docs and code the Dot creates that render live in the
    *  chat's artifact panel — no local folder involved. */

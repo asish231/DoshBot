@@ -127,6 +127,23 @@ The included speech adapter uses the Realtime API at `api.openai.com`. Set `VOIC
 
 A configured key is not evidence of a successful call. Verify microphone access, audio playback, compute delegation, interruption, hangup, and the saved receipt with your deployment before relying on voice workflows.
 
+## Long-horizon task force
+
+The task force is DoshBot's long-horizon research engine: a genetic swarm whose workers can each spawn recursive deep-dive sub-swarms of their own (to depth 6), all running concurrently with per-agent cross-linked memory. The Dot launches it on its own initiative for deep missions, or the owner can command it directly:
+
+```text
+/tf 6 Full UX/UI audit of my app onboarding — map every screen, list what is missing, define the ideal UI
+```
+
+`/tf <mission>` lets the Dot pick the hours from mission scale; `/tf <hours> <mission>` sets the budget explicitly. The swarm runs server-side for the whole budget, and the final report lands in the conversation as an artifact.
+
+- **Tier settings** (Settings → General, via `PATCH /api/settings`): `taskForceMaxHours` (1–24, default 24), `taskForceMaxWorkers` (per-session total, default 2000), `taskForceConcurrency` (simultaneous model calls, default 12).
+- **Introspection**: `GET /api/task-force` lists sessions; `GET /api/task-force/:id` returns generation, worker counts, and top findings; `POST /api/task-force/:id/{pause,resume,cancel}` controls a run. Session routes enforce conversation ownership.
+- **Memory**: every worker's finding is persisted in full (`tf_memories`) with only summaries riding in later prompts; `task_force_recall` retrieves summaries-of-summaries to any depth, or full content by `memoryId`. Nothing is ever deleted — only compacted by summary.
+- **Model**: the engine calls the workspace model endpoint directly (Settings local provider or `.env`), outside the per-Dot token budget. Sessions persist in SQLite and resume after a restart.
+
+A configured model endpoint is not evidence of a completed mission. Verify with a short run (e.g. `/tf 0.5 ...`) that workers complete, the memory graph populates, and the report artifact appears in the chat before launching a multi-hour mission.
+
 ## Containers
 
 Set `OWNER_TOKEN` and `BROWSER_SECRET` to different random secrets of at least 24 characters in `.env`, then run:

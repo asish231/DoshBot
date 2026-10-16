@@ -24,10 +24,7 @@ import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { TelegramChannel } from './telegram-channel.js';
 import { attachGeminiLiveHandler } from './gemini-live.js';
-import {
-  TaskForceEngine,
-  setTaskForceEngine,
-} from './task-force.js';
+import { TaskForceEngine, setTaskForceEngine } from './task-force.js';
 import { TaskForceStore } from './task-force-store.js';
 import { AuthRateLimiter } from './auth-rate-limit.js';
 import { WsTicketStore } from './ws-tickets.js';
