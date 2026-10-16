@@ -12,6 +12,7 @@ import {
   Folder,
   FolderOpen,
   FolderGit2,
+  Link2,
   Lock,
   Menu,
   Monitor,
@@ -230,6 +231,12 @@ export function App() {
   const [pane, setPane] = useState(false);
   const [capture, setCapture] = useState<Result>();
   const [prompt, setPrompt] = useState('');
+  // Hero attach menu: the + button opens a popover (files/images need a
+  // conversation, so pre-chat options are link + local folder).
+  const [heroAttachOpen, setHeroAttachOpen] = useState(false);
+  const [heroSourceOpen, setHeroSourceOpen] = useState(false);
+  const [heroSource, setHeroSource] = useState('');
+  const heroAttachRef = useRef<HTMLDivElement>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
@@ -299,6 +306,12 @@ export function App() {
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
+      if (
+        heroAttachRef.current &&
+        !heroAttachRef.current.contains(e.target as Node)
+      ) {
+        setHeroAttachOpen(false);
+      }
       if (
         homeModelPopoverRef.current &&
         !homeModelPopoverRef.current.contains(e.target as Node)
@@ -600,9 +613,7 @@ export function App() {
       });
       await refresh();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Could not sign in.',
-      );
+      setError(err instanceof Error ? err.message : 'Could not sign in.');
     } finally {
       setAuthBusy(false);
     }
@@ -619,9 +630,7 @@ export function App() {
     setState(undefined);
     setWorkspace(undefined);
     setNeedsAuth(true);
-    setAuthStatus((prev) =>
-      prev ? { ...prev, user: null } : prev,
-    );
+    setAuthStatus((prev) => (prev ? { ...prev, user: null } : prev));
   };
 
   if (needsAuth) {
@@ -633,9 +642,7 @@ export function App() {
         {accountFlow ? (
           <>
             <h1>
-              {needsSetup
-                ? 'Set up your DoshBot'
-                : 'Your own little corner.'}
+              {needsSetup ? 'Set up your DoshBot' : 'Your own little corner.'}
             </h1>
             <p>
               {needsSetup
@@ -777,8 +784,7 @@ export function App() {
           <>
             <h1>Your own little corner.</h1>
             <p>
-              Enter the owner access token configured on this template’s
-              server.
+              Enter the owner access token configured on this template’s server.
             </p>
             <form
               onSubmit={async (e) => {
@@ -812,7 +818,9 @@ export function App() {
                 {error}
               </p>
             )}
-            <p className="muted">The token stays in this tab’s session storage.</p>
+            <p className="muted">
+              The token stays in this tab’s session storage.
+            </p>
           </>
         )}
       </main>
@@ -1042,16 +1050,11 @@ export function App() {
                   {authStatus.user.displayName}
                 </small>
                 <small className="nav-user-role">
-                  {authStatus.user.role === 'owner'
-                    ? 'Owner'
-                    : 'Member'}{' '}
-                  · {authStatus.user.email}
+                  {authStatus.user.role === 'owner' ? 'Owner' : 'Member'} ·{' '}
+                  {authStatus.user.email}
                 </small>
               </div>
-              <button
-                className="nav-item"
-                onClick={() => void signOut()}
-              >
+              <button className="nav-item" onClick={() => void signOut()}>
                 <Lock size={17} />
                 <span>Sign out</span>
               </button>
@@ -1319,9 +1322,38 @@ export function App() {
                     className="chat-composer-box"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      void newConversation(prompt);
+                      const composed = heroSource.trim()
+                        ? `From ${heroSource.trim()}:\n\n${prompt}`
+                        : prompt;
+                      void newConversation(composed).then(() => {
+                        setHeroSource('');
+                        setHeroSourceOpen(false);
+                      });
                     }}
                   >
+                    {heroSourceOpen && (
+                      <div className="source-input">
+                        <Link2 size={15} />
+                        <input
+                          aria-label="Source page URL"
+                          type="url"
+                          value={heroSource}
+                          onChange={(e) => setHeroSource(e.target.value)}
+                          placeholder="https://example.com/page"
+                        />
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="Remove source"
+                          onClick={() => {
+                            setHeroSourceOpen(false);
+                            setHeroSource('');
+                          }}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )}
                     <textarea
                       aria-label="Start a conversation"
                       placeholder={
@@ -1402,17 +1434,78 @@ export function App() {
                         >
                           <ArrowUp size={15} strokeWidth={2.5} />
                         </button>
-                        <button
-                          type="button"
-                          className="composer-icon-btn"
-                          aria-label="Attach link"
-                          onClick={() => {
-                            const url = window.prompt('Enter source URL:');
-                            if (url) setPrompt((p) => `From ${url}:\n\n${p}`);
-                          }}
+                        <div
+                          className="chat-popover-container"
+                          ref={heroAttachRef}
                         >
-                          <Plus size={15} strokeWidth={2.2} />
-                        </button>
+                          <button
+                            type="button"
+                            className={`composer-icon-btn ${heroSourceOpen || heroAttachOpen ? 'active' : ''}`}
+                            aria-label="Add a link or connect a folder"
+                            title="Add a link or connect a folder"
+                            onClick={() => setHeroAttachOpen(!heroAttachOpen)}
+                          >
+                            <Plus size={15} strokeWidth={2.2} />
+                          </button>
+                          {heroAttachOpen && (
+                            <div className="chat-popover-menu attach-menu">
+                              <div className="chat-popover-header">
+                                <span>Add context</span>
+                                <small>link · folder</small>
+                              </div>
+                              <button
+                                type="button"
+                                className="chat-popover-item"
+                                onClick={() => {
+                                  setHeroSourceOpen(!heroSourceOpen);
+                                  setHeroAttachOpen(false);
+                                }}
+                              >
+                                <Link2 size={15} />
+                                <div className="chat-effort-col">
+                                  <span className="chat-item-name">
+                                    Attach link
+                                  </span>
+                                  <span className="chat-item-desc">
+                                    Public page for research
+                                  </span>
+                                </div>
+                              </button>
+                              <button
+                                type="button"
+                                className="chat-popover-item"
+                                onClick={() => {
+                                  setHeroAttachOpen(false);
+                                  setDialog({
+                                    type: 'settings',
+                                    initialTab: 'coding',
+                                  });
+                                }}
+                              >
+                                <FolderGit2 size={15} />
+                                <div className="chat-effort-col">
+                                  <span className="chat-item-name">
+                                    Connect local folder
+                                  </span>
+                                  <span className="chat-item-desc">
+                                    Code in a local directory
+                                  </span>
+                                </div>
+                              </button>
+                              <p
+                                className="chat-item-desc"
+                                style={{
+                                  margin: '2px 10px 6px',
+                                  fontSize: '10.5px',
+                                  color: 'var(--muted, #8e8e93)',
+                                }}
+                              >
+                                File and image uploads attach inside the chat
+                                once it starts.
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       <div className="chat-composer-right">
@@ -1816,7 +1909,8 @@ export function App() {
                                 }}
                                 title={`${link.relation}: ${link.target!.text}`}
                               >
-                                {link.relation} → {link.target!.text.slice(0, 40)}
+                                {link.relation} →{' '}
+                                {link.target!.text.slice(0, 40)}
                               </span>
                             ))}
                           </div>
