@@ -296,7 +296,9 @@ export function Chat({
   thread,
   dot,
   initialPrompt,
+  initialFiles,
   onConsumed,
+  onFilesConsumed,
   voiceReady,
   calls,
   paused,
@@ -312,7 +314,11 @@ export function Chat({
   thread: Conversation;
   dot: Dot;
   initialPrompt?: string;
+  /** Files staged on the hero before this conversation existed; ingested
+   *  as real attachments on mount (same processing as in-chat picks). */
+  initialFiles?: File[];
   onConsumed: () => void;
+  onFilesConsumed?: () => void;
   voiceReady: boolean;
   calls: CallReceipt[];
   paused: boolean;
@@ -1685,6 +1691,16 @@ export function Chat({
   useEffect(() => {
     sendLatest.current = send;
   });
+  // Hero-staged files become real attachments the moment the chat mounts.
+  const ingestedInitialFiles = useRef(false);
+  useEffect(() => {
+    if (ingestedInitialFiles.current || !initialFiles?.length) return;
+    ingestedInitialFiles.current = true;
+    void handleFilesSelected(initialFiles).then(() => {
+      onFilesConsumed?.();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread.id]);
   useEffect(() => {
     if (loaded && contextReady && !paused && initialPrompt && !sent.current) {
       sent.current = true;

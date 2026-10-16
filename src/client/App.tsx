@@ -85,6 +85,7 @@ import type {
   WorkspaceState,
 } from '../shared/types';
 import { api, ApiError, authHeaders, setToken } from './api';
+import { stageHeroFiles } from './hero-attach';
 import type { AuthUser } from '../server/auth';
 import {
   SlashCommandsMenu,
@@ -231,8 +232,31 @@ export function App() {
   const [pane, setPane] = useState(false);
   const [capture, setCapture] = useState<Result>();
   const [prompt, setPrompt] = useState('');
-  // Hero attach menu: the + button opens a popover (files/images need a
-  // conversation, so pre-chat options are link + local folder).
+  // Hero file staging: + opens the native OS file picker (Finder / File
+  // Explorer / Android Files) and the picks wait as chips until the chat
+  // is created; the Chat then ingests them as real attachments.
+  const [stagedFiles, setStagedFiles] = useState<
+    Array<{ id: string; file: File }>
+  >([]);
+  const heroFileInputRef = useRef<HTMLInputElement>(null);
+  const onHeroFilesPicked = (files: FileList | null) => {
+    const { accepted, errors } = stageHeroFiles(files);
+    if (errors.length) setError(errors[0]!);
+    if (accepted.length) {
+      setStagedFiles((prev) =>
+        [
+          ...prev,
+          ...accepted.map((file) => ({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            file,
+          })),
+        ].slice(0, 64),
+      );
+    }
+    if (heroFileInputRef.current) heroFileInputRef.current.value = '';
+  };
+  // Hero attach menu: link + folder options stay one click away via the
+  // chevron beside +; the + itself always opens the OS file picker.
   const [heroAttachOpen, setHeroAttachOpen] = useState(false);
   const [heroSourceOpen, setHeroSourceOpen] = useState(false);
   const [heroSource, setHeroSource] = useState('');
@@ -1200,6 +1224,12 @@ export function App() {
                   thread={thread}
                   dot={dot}
                   initialPrompt={pendingPrompt}
+                  initialFiles={
+                    stagedFiles.length
+                      ? stagedFiles.map((staged) => staged.file)
+                      : undefined
+                  }
+                  onFilesConsumed={() => setStagedFiles([])}
                   onConsumed={() => setPendingPrompt(undefined)}
                   voiceReady={workspace.setup.voice}
                   calls={workspace.calls.filter(
@@ -1325,12 +1355,65 @@ export function App() {
                       const composed = heroSource.trim()
                         ? `From ${heroSource.trim()}:\n\n${prompt}`
                         : prompt;
-                      void newConversation(composed).then(() => {
+                      const finalPrompt =
+                        composed.trim() ||
+                        (stagedFiles.length
+                          ? 'Please review the attached file(s).'
+                          : '');
+                      if (!finalPrompt.trim()) return;
+                      void newConversation(finalPrompt).then(() => {
                         setHeroSource('');
                         setHeroSourceOpen(false);
                       });
                     }}
                   >
+                    <input
+                      ref={heroFileInputRef}
+                      type="file"
+                      multiple
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      // Visually hidden but NOT display:none: Safari ignores
+                      // programmatic .click() on display:none file inputs.
+                      style={{
+                        position: 'fixed',
+                        width: 1,
+                        height: 1,
+                        opacity: 0,
+                        pointerEvents: 'none',
+                      }}
+                      onChange={(e) => onHeroFilesPicked(e.target.files)}
+                    />
+                    {stagedFiles.length > 0 && (
+                      <div className="attach-preview-row">
+                        {stagedFiles.map((staged) => (
+                          <div
+                            key={staged.id}
+                            className="attach-chip"
+                            title={staged.file.name}
+                          >
+                            <FileText size={14} />
+                            <span className="attach-name">
+                              {staged.file.name.length > 18
+                                ? `${staged.file.name.slice(0, 15)}…`
+                                : staged.file.name}
+                            </span>
+                            <button
+                              type="button"
+                              className="attach-remove"
+                              aria-label={`Remove ${staged.file.name}`}
+                              onClick={() =>
+                                setStagedFiles((prev) =>
+                                  prev.filter((x) => x.id !== staged.id),
+                                )
+                              }
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {heroSourceOpen && (
                       <div className="source-input">
                         <Link2 size={15} />
@@ -1430,7 +1513,13 @@ export function App() {
                           type="submit"
                           className="composer-send-btn"
                           aria-label="Start conversation"
-                          disabled={!configured || busy || !prompt.trim()}
+                          disabled={
+                            !configured ||
+                            busy ||
+                            (!prompt.trim() &&
+                              stagedFiles.length === 0 &&
+                              !heroSource.trim())
+                          }
                         >
                           <ArrowUp size={15} strokeWidth={2.5} />
                         </button>
@@ -1440,12 +1529,23 @@ export function App() {
                         >
                           <button
                             type="button"
-                            className={`composer-icon-btn ${heroSourceOpen || heroAttachOpen ? 'active' : ''}`}
-                            aria-label="Add a link or connect a folder"
-                            title="Add a link or connect a folder"
-                            onClick={() => setHeroAttachOpen(!heroAttachOpen)}
+                            className="composer-icon-btn"
+                            aria-label="Upload files from your device"
+                            title="Upload files — opens your device file picker (Finder / File Explorer)"
+                            onClick={() =>
+                              heroFileInputRef.current?.click()
+                            }
                           >
                             <Plus size={15} strokeWidth={2.2} />
+                          </button>
+                          <button
+                            type="button"
+                            className={`composer-icon-btn ${heroSourceOpen || heroAttachOpen ? 'active' : ''}`}
+                            aria-label="More attach options"
+                            title="Attach a link or connect a local folder"
+                            onClick={() => setHeroAttachOpen(!heroAttachOpen)}
+                          >
+                            <ChevronDown size={13} />
                           </button>
                           {heroAttachOpen && (
                             <div className="chat-popover-menu attach-menu">
