@@ -1,6 +1,9 @@
 import { PageReviewCard } from './PageReviewCard';
 import { pageReviewSchema, pageReviewTool } from '../shared/page-review';
-import { parseTaskForceSlash } from '../shared/task-force';
+import {
+  parseTaskForceSlash,
+  taskForceCommandPrompt,
+} from '../shared/task-force';
 import { AskQuestionCard } from './AskQuestionCard';
 import { askQuestionSchema, askQuestionTool } from '../shared/ask-question';
 import { CompactToolCard, getToolMeta } from './CompactToolCard';
@@ -1569,7 +1572,7 @@ export function Chat({
         );
         return;
       }
-      outgoing = `**Task Force Mode Active**\nMission: ${mission}\n${hours ? `Time budget: ${hours} hours (the owner chose this — pass it to the tool).\n` : ''}\nLaunch the task_force tool NOW with this mission${hours ? ` and hours: ${hours}` : ' (you pick the hours based on mission scale)'}. Include the full context the owner provided (any attached code, designs, files are in this conversation — inline what matters into the mission). The hybrid swarm+sub-agent tree runs for hours server-side (workers spawn their own recursive sub-swarms, results feed back into its evolution) and files its report back into this conversation as an artifact. After launching, tell the owner it is running and that they can ask you to check progress anytime; do NOT wait for it to finish.`;
+      outgoing = taskForceCommandPrompt(mission, hours);
     } else if (trimmed.startsWith('/search ')) {
       const q = trimmed.slice(8).trim();
       outgoing = `Please search the web for "${q}" and summarize findings with source citations.`;

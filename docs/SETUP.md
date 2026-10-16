@@ -27,16 +27,16 @@ Open http://127.0.0.1:4310. Keep the server running for background work.
 
 Edit `.env` on the server and restart after changes:
 
-| Variable                                      | Purpose                                                   |
-| --------------------------------------------- | --------------------------------------------------------- |
-| `INTELLIGENCE_API_KEY`                        | Project credential for conversation persistence           |
-| `INTELLIGENCE_API_URL`, `INTELLIGENCE_WS_URL` | Endpoint overrides for your Intelligence deployment       |
-| `OPENAI_API_KEY`, `OPENAI_MODEL`              | Model credential and model identifier                     |
-| `OPENAI_BASE_URL`                             | Compatible model API endpoint                             |
+| Variable                                      | Purpose                                                                             |
+| --------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `INTELLIGENCE_API_KEY`                        | Project credential for conversation persistence                                     |
+| `INTELLIGENCE_API_URL`, `INTELLIGENCE_WS_URL` | Endpoint overrides for your Intelligence deployment                                 |
+| `OPENAI_API_KEY`, `OPENAI_MODEL`              | Model credential and model identifier                                               |
+| `OPENAI_BASE_URL`                             | Compatible model API endpoint                                                       |
 | `OWNER_ID`                                    | Stable identity the first signed-up account adopts; owns pre-existing conversations |
-| `DATABASE_PATH`                               | SQLite file containing pages, workspace and work metadata |
-| `OWNER_TOKEN`                                 | Break-glass token mapped to the owner account; required for external bindings  |
-| `APP_ORIGIN`                                  | Exact browser origin when using a proxy or custom domain  |
+| `DATABASE_PATH`                               | SQLite file containing pages, workspace and work metadata                           |
+| `OWNER_TOKEN`                                 | Break-glass token mapped to the owner account; required for external bindings       |
+| `APP_ORIGIN`                                  | Exact browser origin when using a proxy or custom domain                            |
 
 The model environment variable names follow the configured provider adapter. Provider credentials belong in `.env`, not client-side variables or source code. Conversation history lives in the configured Intelligence project; copying the SQLite file alone does not back up that history.
 
@@ -135,7 +135,7 @@ The task force is DoshBot's long-horizon research engine: a genetic swarm whose 
 /tf 6 Full UX/UI audit of my app onboarding — map every screen, list what is missing, define the ideal UI
 ```
 
-`/tf <mission>` lets the Dot pick the hours from mission scale; `/tf <hours> <mission>` sets the budget explicitly. The swarm runs server-side for the whole budget, and the final report lands in the conversation as an artifact.
+`/tf <mission>` lets the Dot pick the hours from mission scale; `/tf <hours> <mission>` sets the budget explicitly. **Every launch is gated**: the Dot first presents its plan — mission reading, proposed hours, deliverables, expected swarm shape — and you approve via the ask-question card before the swarm starts. The mission runs server-side for the whole budget, and the final report lands in the conversation as an artifact.
 
 - **Tier settings** (Settings → General, via `PATCH /api/settings`): `taskForceMaxHours` (1–24, default 24), `taskForceMaxWorkers` (per-session total, default 2000), `taskForceConcurrency` (simultaneous model calls, default 12).
 - **Introspection**: `GET /api/task-force` lists sessions; `GET /api/task-force/:id` returns generation, worker counts, and top findings; `POST /api/task-force/:id/{pause,resume,cancel}` controls a run. Session routes enforce conversation ownership.

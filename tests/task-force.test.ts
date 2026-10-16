@@ -14,7 +14,10 @@ import {
   summarizeText,
   tokenize,
 } from '../src/server/task-force.js';
-import { parseTaskForceSlash } from '../src/shared/task-force.js';
+import {
+  parseTaskForceSlash,
+  taskForceCommandPrompt,
+} from '../src/shared/task-force.js';
 
 const resources: (() => void)[] = [];
 afterEach(() => {
@@ -215,6 +218,29 @@ describe('TaskForceStore', () => {
     expect(tf.searchMemories(['onboarding']).map((m) => m.id)).toContain(
       memory.id,
     );
+  });
+});
+
+describe('taskForceCommandPrompt', () => {
+  it('always gates the launch behind an owner-visible plan and approval', () => {
+    const withHours = taskForceCommandPrompt(
+      'Full UX/UI audit of my app onboarding',
+      6,
+    );
+    expect(withHours).toContain('**Task Force Mode Active**');
+    expect(withHours).toContain('6 hours (the owner chose this');
+    // The check-in contract: plan first, ask_question, launch only on approval.
+    expect(withHours).toContain('BEFORE LAUNCHING, you MUST check in');
+    expect(withHours).toContain('ask_question');
+    expect(withHours).toContain('ONLY after the owner approves');
+    expect(withHours).toContain('(1) your reading of the mission');
+    expect(withHours).toContain('(4) the swarm approach');
+  });
+
+  it('asks the Dot to propose the hours when the owner did not set them', () => {
+    const noHours = taskForceCommandPrompt('Deep market research', undefined);
+    expect(noHours).toContain('YOU propose the hours');
+    expect(noHours).not.toContain('the owner chose this');
   });
 });
 

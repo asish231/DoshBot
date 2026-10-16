@@ -77,6 +77,30 @@ export interface TaskForceMemory {
 }
 
 /**
+ * The prompt the /tf slash command injects. The task force is a multi-hour,
+ * high-compute commitment, so the owner always gets a plan-then-confirm
+ * gate: the Dot must present its plan (mission reading, hours, deliverables,
+ * swarm shape) and get explicit approval before launching the tool.
+ */
+export function taskForceCommandPrompt(
+  mission: string,
+  hours?: number,
+): string {
+  return [
+    '**Task Force Mode Active**',
+    `Mission: ${mission}`,
+    hours
+      ? `Time budget: ${hours} hours (the owner chose this — pass it to the tool unchanged).`
+      : 'Time budget: not specified — YOU propose the hours based on mission scale.',
+    '',
+    'BEFORE LAUNCHING, you MUST check in with the owner: present your plan — (1) your reading of the mission in one or two lines, (2) the hours budget you will pass to the tool and why, (3) the deliverables (concrete questions/sections) the final report must answer, and (4) the swarm approach you expect (worker scale over generations, deep-dive sub-topics worth spawning). Use ask_question with an "Approve & launch" option and an option to adjust the plan, and call task_force ONLY after the owner approves. If they adjust anything, launch with the adjusted plan.',
+    'When building the mission argument, include the full context the owner provided (any attached code, designs, files are in this conversation — inline what matters into the mission).',
+    'The hybrid swarm+sub-agent tree runs for hours server-side (workers spawn their own recursive sub-swarms, results feed back into its evolution) and files its report back into this conversation as an artifact.',
+    'After the tool launches, tell the owner the session is running and they can ask you for progress anytime; do NOT wait for it to finish.',
+  ].join('\n');
+}
+
+/**
  * Parses the owner's "/tf [hours] mission" slash command (alias
  * /taskforce). Returns null when the text is not a task force command.
  * A leading number between 0.25 and 24 followed by a space is the hours
