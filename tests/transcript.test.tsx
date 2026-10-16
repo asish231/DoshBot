@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   ChatTranscript,
-  isInternalVoiceReceipt,
+  isInternalSystemPrompt,
 } from '../src/client/ChatTranscript';
 import type { Message } from '@ag-ui/core';
 it('keeps call receipts between the anchored message and later conversation turns', () => {
@@ -88,6 +88,11 @@ it('hides only marked receipt prompts while retaining summaries and prior unmark
       content: 'Persisted internal instructions without metadata',
     },
     {
+      id: 'opendots:task_force:durable',
+      role: 'user',
+      content: 'Internal task force completion notification',
+    },
+    {
       id: 'summary',
       role: 'assistant',
       content: 'Confirmed call summary',
@@ -102,7 +107,7 @@ it('hides only marked receipt prompts while retaining summaries and prior unmark
   ];
   const html = renderToStaticMarkup(
     <ChatTranscript
-      messages={messages.filter((message) => !isInternalVoiceReceipt(message))}
+      messages={messages.filter((message) => !isInternalSystemPrompt(message))}
       calls={[]}
     />,
   );
@@ -110,6 +115,7 @@ it('hides only marked receipt prompts while retaining summaries and prior unmark
   expect(html).not.toContain(
     'Persisted internal instructions without metadata',
   );
+  expect(html).not.toContain('Internal task force completion notification');
   expect(html).toContain('Earlier unmarked receipt prompt');
   expect(html).toContain('Confirmed call summary');
   expect(html).toContain('My next question');

@@ -245,6 +245,7 @@ export function App() {
       'init',
       'review',
       'subagents',
+      'tf',
       'memory',
       'schedule',
       'search',

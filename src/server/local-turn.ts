@@ -7,7 +7,7 @@ import {
   type RunAgentInput,
 } from '@ag-ui/core';
 import { currentTurnText } from './headless.js';
-import { voiceReceiptMessagePrefix } from '../shared/voice-receipt.js';
+import { systemMessagePrefix } from '../shared/voice-receipt.js';
 
 export interface LocalTurnRunner {
   getThreadMessages(threadId: string): Message[];
@@ -39,14 +39,15 @@ export async function runLocalTurn(options: {
   signal.throwIfAborted();
   const history = runner.getThreadMessages(threadId);
   const runId = randomUUID();
-  const receipt = metadata?.opendotsSource === 'voice_receipt';
   const input: RunAgentInput = {
     threadId,
     runId,
     messages: [
       ...history,
       {
-        id: `${receipt ? voiceReceiptMessagePrefix : ''}${randomUUID()}`,
+        id: `${systemMessagePrefix(
+          metadata?.opendotsSource as string | undefined,
+        )}${randomUUID()}`,
         role: 'user',
         content: prompt,
         ...(metadata ? { metadata } : {}),

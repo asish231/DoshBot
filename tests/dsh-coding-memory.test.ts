@@ -275,6 +275,14 @@ describe('DeepSeek Harness Native Coding Tools', () => {
     }
   });
 
+  it('registers the /tf task force command for launching the long-horizon swarm', () => {
+    const tf = SLASH_COMMANDS.find((c) => c.command === '/tf');
+    expect(tf).toBeDefined();
+    expect(tf!.category).toBe('tools');
+    expect(tf!.placeholder).toBe('/tf 6 ');
+    expect(tf!.description).toContain('hours');
+  });
+
   it('enforces DeepSeek Harness coding permissions to deny bash and edits when configured', async () => {
     const { dir, ws, store } = createFixture();
     const space = ws.spaces()[0]!;

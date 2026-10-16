@@ -5,17 +5,22 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AssistantMessage, Message } from '@ag-ui/core';
 import type { CallReceipt } from '../shared/types';
-import { voiceReceiptMessagePrefix } from '../shared/voice-receipt';
+import {
+  taskForceMessagePrefix,
+  voiceReceiptMessagePrefix,
+} from '../shared/voice-receipt';
 // These markers only control rendering; they do not confer trust or permissions.
-export function isInternalVoiceReceipt(message: Message): boolean {
+export function isInternalSystemPrompt(message: Message): boolean {
   const metadata = message.metadata;
   return (
     message.role === 'user' &&
     (message.id.startsWith(voiceReceiptMessagePrefix) ||
+      message.id.startsWith(taskForceMessagePrefix) ||
       (!!metadata &&
         typeof metadata === 'object' &&
         'opendotsSource' in metadata &&
-        metadata.opendotsSource === 'voice_receipt'))
+        (metadata.opendotsSource === 'voice_receipt' ||
+          metadata.opendotsSource === 'task_force')))
   );
 }
 function Receipt({ call }: { call: CallReceipt }) {

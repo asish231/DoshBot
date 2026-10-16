@@ -10,6 +10,7 @@ import type { Platform } from './platform.js';
 import { VoiceService } from './voice.js';
 import { workspaceRoutes } from './workspace-routes.js';
 import { redactSettings, resolveSettingsPatch } from './settings-redaction.js';
+import { getTaskForceEngine } from './task-force.js';
 import { skillInputSchema } from '../shared/skills.js';
 import type { AuthRateLimiter } from './auth-rate-limit.js';
 import type { WsTicketStore } from './ws-tickets.js';
@@ -602,6 +603,15 @@ export function createApp({
         codingEnabled: z.boolean().optional(),
         codingPermissions: z.string().max(4096).nullable().optional(),
         opencodeVariant: z.string().trim().max(50).nullable().optional(),
+        taskForceMaxHours: z.number().int().min(1).max(24).nullable().optional(),
+        taskForceMaxWorkers: z
+          .number()
+          .int()
+          .min(16)
+          .max(100000)
+          .nullable()
+          .optional(),
+        taskForceConcurrency: z.number().int().min(1).max(64).nullable().optional(),
         allowSignups: z.boolean().optional(),
         computerEnvironment: z.string().trim().max(50).nullable().optional(),
         voiceTelephonyProvider: z.string().trim().max(50).nullable().optional(),
@@ -771,6 +781,83 @@ export function createApp({
       : c.json({ error: 'File not found.' }, 404),
   );
   app.get('/api/monitors', (c) => c.json(store.monitors()));
+  // ── Long-horizon task force: session introspection & control ─────────
+  app.get('/api/task-force', (c) => {
+    const engine = getTaskForceEngine();
+    if (!engine)
+      return c.json(
+        { error: 'The task force engine is not running on this server.' },
+        503,
+      );
+    return c.json(engine.listSessions());
+  });
+  app.get('/api/task-force/:id', (c) => {
+    const engine = getTaskForceEngine();
+    if (!engine)
+      return c.json(
+        { error: 'The task force engine is not running on this server.' },
+        503,
+      );
+    try {
+      const detail = engine.status(c.req.param('id'));
+      const threadId = engine.sessionThreadId(c.req.param('id'));
+      if (threadId)
+        platform?.workspace.requireThread(
+          threadId,
+          undefined,
+          c.get('user')?.id,
+        );
+      return c.json(detail);
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Task force session not found.',
+        },
+        404,
+      );
+    }
+  });
+  app.post('/api/task-force/:id/:action', async (c) => {
+    const engine = getTaskForceEngine();
+    if (!engine)
+      return c.json(
+        { error: 'The task force engine is not running on this server.' },
+        503,
+      );
+    const action = c.req.param('action');
+    if (!['pause', 'resume', 'cancel'].includes(action))
+      return c.json({ error: 'Unknown task force action.' }, 400);
+    try {
+      const threadId = engine.sessionThreadId(c.req.param('id'));
+      if (threadId)
+        platform?.workspace.requireThread(
+          threadId,
+          undefined,
+          c.get('user')?.id,
+        );
+      const session =
+        action === 'pause'
+          ? engine.pause(c.req.param('id'))
+          : action === 'resume'
+            ? engine.resume(c.req.param('id'))
+            : engine.cancel(c.req.param('id'));
+      if (!session) return c.json({ error: 'Session not found.' }, 404);
+      return c.json(session);
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Could not update the session.',
+        },
+        404,
+      );
+    }
+  });
   app.delete('/api/monitors/:id', (c) =>
     store.deleteMonitor(c.req.param('id'))
       ? c.json({ ok: true })

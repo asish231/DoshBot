@@ -2,7 +2,7 @@ import { IntelligenceAgent } from '@copilotkit/core';
 import type { Message } from '@ag-ui/core';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { voiceReceiptMessagePrefix } from '../shared/voice-receipt.js';
+import { systemMessagePrefix } from '../shared/voice-receipt.js';
 
 export function currentTurnText(messages: Message[], error?: Error): string {
   if (error) throw error;
@@ -71,7 +71,9 @@ export async function runThreadTurn(
   try {
     signal.throwIfAborted();
     agent.addMessage({
-      id: `${metadata?.opendotsSource === 'voice_receipt' ? voiceReceiptMessagePrefix : ''}${randomUUID()}`,
+      id: `${systemMessagePrefix(
+        metadata?.opendotsSource as string | undefined,
+      )}${randomUUID()}`,
       role: 'user',
       content: prompt,
       ...(metadata ? { metadata } : {}),

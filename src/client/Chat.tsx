@@ -53,7 +53,7 @@ import {
   ComputerToolCard,
   type ComputerToolRenderProps,
 } from './ComputerToolCard';
-import { ChatTranscript, isInternalVoiceReceipt } from './ChatTranscript';
+import { ChatTranscript, isInternalSystemPrompt } from './ChatTranscript';
 import type {
   Artifact,
   CallReceipt,
@@ -1549,6 +1549,31 @@ export function Chat({
     } else if (trimmed.startsWith('/subagents')) {
       const mission = trimmed.slice(11).trim();
       outgoing = `**Swarm Mode Active**\nMission: ${mission || '(see conversation context)'}\n\nSplit this mission into independent parallel tracks and execute them with ONE run_subagents call (all tracks at once) — the swarm size is your decision: 2-5 tracks for focused work, dozens for broad sweeps with one file or area per track. Give each track a name and pick the right specialist agent profile for it (explore for read-only research, plan for planning, build or general for hands-on work). Then synthesize the merged per-track results into a single final answer with evidence.`;
+    } else if (
+      trimmed === '/tf' ||
+      trimmed.startsWith('/tf ') ||
+      trimmed === '/taskforce' ||
+      trimmed.startsWith('/taskforce ')
+    ) {
+      const rest = trimmed.replace(/^\/(tf|taskforce)\s*/, '').trim();
+      // Optional hours budget as the first token: "/tf 6 audit my app".
+      // Only a plausible budget (0.25-24) followed by a space counts —
+      // "/tf 1984 novel analysis" stays a plain mission.
+      const hoursMatch = rest.match(/^(\d{1,2}(?:\.\d+)?)\s+([\s\S]+)$/);
+      const parsed = hoursMatch ? Number(hoursMatch[1]) : undefined;
+      const hours =
+        parsed !== undefined && parsed >= 0.25 && parsed <= 24
+          ? parsed
+          : undefined;
+      const mission = (hours && hoursMatch ? hoursMatch[2] : rest).trim();
+      if (!mission) {
+        setDraft('/tf ');
+        setError(
+          'Add your mission after /tf — e.g. /tf 6 Full UX/UI audit of my app onboarding, designs attached',
+        );
+        return;
+      }
+      outgoing = `**Task Force Mode Active**\nMission: ${mission}\n${hours ? `Time budget: ${hours} hours (the owner chose this — pass it to the tool).\n` : ''}\nLaunch the task_force tool NOW with this mission${hours ? ` and hours: ${hours}` : ' (you pick the hours based on mission scale)'}. Include the full context the owner provided (any attached code, designs, files are in this conversation — inline what matters into the mission). The swarm runs for hours server-side, evolves generations of workers, and files its report back into this conversation as an artifact. After launching, tell the owner it is running and that they can ask you to check progress anytime; do NOT wait for it to finish.`;
     } else if (trimmed.startsWith('/search ')) {
       const q = trimmed.slice(8).trim();
       outgoing = `Please search the web for "${q}" and summarize findings with source citations.`;
@@ -1556,7 +1581,7 @@ export function Chat({
       const url = trimmed.slice(8).trim();
       outgoing = `Please navigate to ${url} using your computer browser tool and inspect the page content.`;
     } else if (trimmed === '/help') {
-      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /init, /review, /undo, /subagents, /skills, /compact, /memory, /btw, /model, /tasks, /new, /mcp, /schedule, /search, /browse, /clear) and explain briefly how to use each.`;
+      outgoing = `What commands and tools are available in DoshBot by SafarNow? Please list the slash commands (/goal, /code, /plan, /init, /review, /undo, /subagents, /tf, /skills, /compact, /memory, /btw, /model, /tasks, /new, /mcp, /schedule, /search, /browse, /clear) and explain briefly how to use each.`;
     }
 
     const attachmentContext = await buildAttachmentContext();
@@ -1731,7 +1756,7 @@ export function Chat({
   );
   const visible = agent.messages.filter(
     (message) =>
-      !isInternalVoiceReceipt(message) &&
+      !isInternalSystemPrompt(message) &&
       ['user', 'assistant'].includes(message.role) &&
       ((typeof message.content === 'string' && message.content.trim()) ||
         (message.role === 'assistant' &&

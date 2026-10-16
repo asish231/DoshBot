@@ -99,6 +99,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     category: 'tools',
   },
   {
+    id: 'tf',
+    command: '/tf',
+    name: 'Task Force',
+    description:
+      'Long-horizon research task force — genetic-evolution swarm for hours-deep missions (UX/UI audits, market research). Usage: /tf <mission> or /tf <hours> <mission>',
+    placeholder: '/tf 6 ',
+    category: 'tools',
+  },
+  {
     id: 'mcp',
     command: '/mcp',
     name: 'MCP Servers',

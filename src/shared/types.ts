@@ -32,6 +32,12 @@ export interface Settings {
   codingPermissions?: string | null;
   /** Reasoning effort variant for OpenCode models ('minimal' | 'low' | 'medium' | 'high' | 'max') */
   opencodeVariant?: string | null;
+  /** Task force: max time budget per session in hours (tier lever, 1-24). */
+  taskForceMaxHours?: number | null;
+  /** Task force: hard cap on workers per session. */
+  taskForceMaxWorkers?: number | null;
+  /** Task force: simultaneous model calls across all sessions. */
+  taskForceConcurrency?: number | null;
   /** Whether new accounts may sign up (owner can disable once the team exists). */
   allowSignups?: boolean | null;
   /** CopilotKit computer sandbox environment (e.g. 'alpine' for Apple Silicon). */

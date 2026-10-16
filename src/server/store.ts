@@ -28,6 +28,9 @@ const defaults: Settings = {
   codingDirectory: null,
   codingPermissions: JSON.stringify({ bash: 'auto', edits: 'auto' }),
   opencodeVariant: 'high',
+  taskForceMaxHours: 24,
+  taskForceMaxWorkers: 2000,
+  taskForceConcurrency: 12,
 };
 /** Most bytes one uploaded file may occupy on disk. */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;

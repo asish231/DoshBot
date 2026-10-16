@@ -24,6 +24,11 @@ import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { TelegramChannel } from './telegram-channel.js';
 import { attachGeminiLiveHandler } from './gemini-live.js';
+import {
+  TaskForceEngine,
+  setTaskForceEngine,
+} from './task-force.js';
+import { TaskForceStore } from './task-force-store.js';
 import { AuthRateLimiter } from './auth-rate-limit.js';
 import { WsTicketStore } from './ws-tickets.js';
 import { AuthStore } from './auth.js';
@@ -104,6 +109,30 @@ const runner = new Runner(
   },
 );
 const monitors = new MonitorService(store, workspace);
+// Long-horizon task force: the autonomous research swarm. Own SQLite handle,
+// resumable sessions, completion reported into the owning conversation.
+const taskForceStore = new TaskForceStore(database);
+const taskForce = new TaskForceEngine(store, taskForceStore, {
+  model: {
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey ?? '',
+    model: config.model ?? '',
+  },
+  saveArtifact: async (artifact) =>
+    store.saveArtifact(
+      artifact.title,
+      artifact.kind,
+      artifact.content,
+      artifact.language ?? null,
+      artifact.threadId ?? null,
+    ),
+  notify: async (threadId, message) => {
+    await platform.turn(threadId, message, AbortSignal.timeout(60_000), {
+      opendotsSource: 'task_force',
+    });
+  },
+});
+setTaskForceEngine(taskForce);
 const wsOrigin = new URL(
   config.intelligenceWsUrl ?? 'wss://realtime.intelligence.copilotkit.ai',
 ).origin;
@@ -141,6 +170,7 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   runner.start();
   monitors.start();
   telegram.start();
+  taskForce.start();
   void platform
     .start()
     .catch((error) =>
@@ -161,6 +191,7 @@ const shutdown = createShutdown({
     runner.stop();
     monitors.stop();
     telegram.stop();
+    taskForce.stop();
   },
   stopPlatform: () => platform.stop(),
   stopVoice: () => {
