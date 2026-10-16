@@ -6,7 +6,12 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 COPY deployment/computers/cache-apks /tmp/cache-apks
-RUN apk add --no-cache --allow-untrusted /tmp/cache-apks/*.apk && \
+RUN ARCH="$(apk --print-arch)" && \
+    if [ "$ARCH" = "aarch64" ] && [ -d /tmp/cache-apks ] && [ "$(ls -A /tmp/cache-apks/*.apk 2>/dev/null)" ]; then \
+      apk add --no-cache --allow-untrusted /tmp/cache-apks/*.apk; \
+    else \
+      apk add --no-cache chromium bash; \
+    fi && \
     apk add --no-cache font-wqy-zenhei font-noto-cjk font-noto-arabic && \
     rm -rf /tmp/cache-apks
 

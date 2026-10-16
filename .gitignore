@@ -27,3 +27,7 @@ reference/
 
 # Computer apk package cache
 deployment/computers/cache-apks/
+
+# Keys and certificates
+*.pem
+*.key
